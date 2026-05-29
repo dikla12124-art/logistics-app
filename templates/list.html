@@ -615,39 +615,52 @@ function renderCarView(){
   const cars=carViewDir==='arrive'?d.cars_arrive:d.cars_return;
   const unassn=carViewDir==='arrive'?d.unassigned_arrive:d.unassigned_return;
   const total=carViewDir==='arrive'?d.total_arrive:d.total_return;
-  let html=`
-  <div class="cv-dir-toggle">
-    <button class="cv-dir-btn ${carViewDir==='arrive'?'active':''}" onclick="carViewDir='arrive';renderCarView()">✈️ הגעה (${d.total_arrive}) — בחר נהגים</button>
+
+  let html=`<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+  <div style="flex:1;min-width:280px">
+  <div class="cv-dir-toggle" style="margin-bottom:12px">
+    <button class="cv-dir-btn ${carViewDir==='arrive'?'active':''}" onclick="carViewDir='arrive';renderCarView()">✈️ הגעה (${d.total_arrive})</button>
     <button class="cv-dir-btn ${carViewDir==='return'?'active':''}" onclick="carViewDir='return';renderCarView()">🏠 חזרה (${d.total_return})</button>
-    ${IS_ADMIN&&carViewDir==='return'?`<button class="btn btn-ghost btn-sm" style="margin-right:auto" onclick="assignReturn()">🔄 שבץ חזור מחדש</button>`:''}
-  </div>`;
-  if(d.recommendation&&d.recommendation.length)
-    html+=`<div class="cv-rec">⚠️ ${d.recommendation.join(' · ')}<button class="btn btn-ghost btn-sm" style="margin-right:auto" onclick="assignCars()">🔄 שבץ מחדש</button></div>`;
-  else if(total>0)
-    html+=`<div class="cv-ok">✅ כל ${total} האנשים שובצו ב-${d.car_count} רכבים</div>`;
-  html+=`<div class="cv-cars">`;
-  const carKeys=Object.keys(cars).sort((a,b)=>{const na=parseInt(a.replace(/\D/g,'')||0),nb=parseInt(b.replace(/\D/g,'')||0);return na-nb;});
-  carKeys.forEach(cname=>{
-    const car=cars[cname];
+  </div>
+  ${carViewDir==='arrive'&&IS_ADMIN?'<div style="font-size:11px;color:rgba(251,191,36,.6);margin-bottom:10px">💡 בחר נהג לכל רכב, ואז לחץ "שבץ חזור"</div>':''}
+  ${carViewDir==='return'&&IS_ADMIN?'<div style="margin-bottom:10px"><button class="btn btn-ghost btn-sm" onclick="assignReturn()">🔄 שבץ חזור מחדש</button></div>':''}
+  ${d.recommendation&&d.recommendation.length?`<div class="cv-rec">⚠️ ${d.recommendation.join(' · ')}</div>`:total>0&&Object.keys(cars).length>0?`<div class="cv-ok" style="margin-bottom:12px">✅ כל ${total} האנשים שובצו</div>`:''}
+  <div class="cv-cars">`;
+
+  Object.entries(cars).forEach(([cname,car])=>{
     html+=`<div class="cv-car ${car.driver?'has-driver':''}">
       <div class="cv-car-title">🚗 ${cname} <span style="font-size:10px;color:rgba(255,255,255,.3);margin-right:auto">${car.people.length}/${car.capacity}</span></div>
-      ${car.dates&&car.dates.length?`<div style="font-size:10px;color:rgba(251,191,36,.6);margin-bottom:8px;display:flex;align-items:center;gap:4px">📅 ${car.dates.join(', ')}</div>`:''}
+      <div style="font-size:11px;color:rgba(251,191,36,.7);margin-bottom:7px">📅 ${car.date||'—'}</div>
       <div class="cv-seats">`;
     car.people.forEach(person=>{
       const isDrv=car.driver===person;
       html+=`<div class="cv-seat ${isDrv?'driver':''}">
         <span>${isDrv?'🧑‍✈️':'🧑'}</span><span class="sname">${person}</span>
         ${isDrv?'<span class="dbadge">נהג</span>':''}
-        ${IS_ADMIN?`<button class="md-btn" onclick="setDriver('${cname}','${person.replace(/'/g,"\\'")}',${isDrv})">${isDrv?'הסר':'נהג'}</button>`:''}
+        ${IS_ADMIN?`<button class="md-btn" onclick="setDriver('${cname}','${person.replace(/'/g,"\'")}',${isDrv})">${isDrv?'הסר':'נהג'}</button>`:''}
       </div>`;
     });
     for(let i=car.people.length;i<car.capacity;i++)
       html+=`<div class="cv-seat empty"><span>💺</span><span class="sname">פנוי</span></div>`;
     html+=`</div></div>`;
   });
+
+  html+=`</div></div>`;
+
+  // Unassigned sidebar
+  if(unassn&&unassn.length){
+    html+=`<div style="min-width:160px;max-width:200px">
+      <div class="cv-unassigned">
+        <h4>⚠️ ללא רכב (${unassn.length})</h4>
+        <div style="font-size:10px;color:rgba(255,200,50,.4);margin-bottom:6px">הוסף רכבים בהגדרות</div>
+        <div class="cv-tags" style="flex-direction:column">
+          ${unassn.map(p=>`<span class="cv-ptag" style="margin-bottom:3px">${p}</span>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+
   html+=`</div>`;
-  if(unassn&&unassn.length)
-    html+=`<div class="cv-unassigned"><h4>⚠️ ${unassn.length} ללא שיבוץ</h4><div class="cv-tags">${unassn.map(p=>`<span class="cv-ptag">${p}</span>`).join('')}</div></div>`;
   area.innerHTML=html;
 }
 
