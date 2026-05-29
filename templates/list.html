@@ -267,7 +267,8 @@ function renderTable(){
   tb.innerHTML=`<input class="srch" placeholder="🔍 חיפוש..." value="${search}" oninput="onSearch(this.value)">
     <button class="btn btn-ghost btn-sm" onclick="doExport()">📥 ייצא</button>
     ${IS_ADMIN?`<label class="btn btn-ghost btn-sm" style="cursor:pointer">📤 ייבא<input type="file" accept=".xlsx,.xls" style="display:none" onchange="quickImport(this)"></label>
-    <button class="btn btn-amber btn-sm" onclick="assignCars()">🚗 שבץ רכבים</button>
+    <button class="btn btn-amber btn-sm" onclick="assignCars()">🚗 שבץ הלוך</button>
+    <button class="btn btn-ghost btn-sm" onclick="assignReturn()">🔄 שבץ חזור</button>
     <button class="btn btn-primary btn-sm" onclick="addRow()">+ שורה</button>`:''}`;
   area.appendChild(tb);
 
@@ -402,10 +403,32 @@ function toast(msg){
 
 // Car assign
 async function assignCars(){
-  if(!confirm(`לשבץ רכבים? ${lstConfig.car_count} רכבים × ${lstConfig.car_capacity} מקומות`))return;
+  if(!confirm(`שבץ הלוך: ${lstConfig.car_count} רכבים × ${lstConfig.car_capacity} מקומות\nשים לב: שיבוץ החזור יאופס — יש לבחור נהגים מחדש`))return;
   const r=await fetch('/api/lists/'+LID+'/assign-cars',{method:'POST'});
   const j=await r.json();
-  if(j.ok){await loadRows();renderTable();toast(`✅ שובצו ${j.updated} שיבוצים`);}
+  if(j.ok){await loadRows();renderTable();toast(`✅ שובצו ${j.updated} שיבוצי הלוך — עכשיו בחר נהגים בטאב "רכבים" ואז לחץ "שבץ חזור"`);}
+}
+
+async function assignReturn(){
+  // Check drivers are set
+  const r=await fetch('/api/lists/'+LID+'/car-view');
+  const cv=await r.json();
+  const missingDrivers=Object.entries(cv.cars_arrive||{}).filter(([k,v])=>v.people.length>0&&!v.driver);
+  if(missingDrivers.length>0){
+    if(!confirm(`${missingDrivers.length} רכבים עדיין ללא נהג.\nלהמשיך בכל זאת?`)) return;
+  }
+  const r2=await fetch('/api/lists/'+LID+'/assign-cars-return',{method:'POST'});
+  const j=await r2.json();
+  if(j.ok){
+    await loadRows(); renderTable();
+    if(j.errors&&j.errors.length){
+      let msg=`✅ שובצו ${j.assigned} אנשים לחזור\n⚠️ ${j.errors.length} בעיות:\n`;
+      j.errors.forEach(e=>msg+='• '+e.message+'\n');
+      alert(msg);
+    } else {
+      toast(`✅ שובצו ${j.assigned} אנשים לחזור`);
+    }
+  }
 }
 
 // ── ADMIN PANEL ────────────────────────────────────────────────────────────────
@@ -594,8 +617,9 @@ function renderCarView(){
   const total=carViewDir==='arrive'?d.total_arrive:d.total_return;
   let html=`
   <div class="cv-dir-toggle">
-    <button class="cv-dir-btn ${carViewDir==='arrive'?'active':''}" onclick="carViewDir='arrive';renderCarView()">✈️ הגעה (${d.total_arrive})</button>
+    <button class="cv-dir-btn ${carViewDir==='arrive'?'active':''}" onclick="carViewDir='arrive';renderCarView()">✈️ הגעה (${d.total_arrive}) — בחר נהגים</button>
     <button class="cv-dir-btn ${carViewDir==='return'?'active':''}" onclick="carViewDir='return';renderCarView()">🏠 חזרה (${d.total_return})</button>
+    ${IS_ADMIN&&carViewDir==='return'?`<button class="btn btn-ghost btn-sm" style="margin-right:auto" onclick="assignReturn()">🔄 שבץ חזור מחדש</button>`:''}
   </div>`;
   if(d.recommendation&&d.recommendation.length)
     html+=`<div class="cv-rec">⚠️ ${d.recommendation.join(' · ')}<button class="btn btn-ghost btn-sm" style="margin-right:auto" onclick="assignCars()">🔄 שבץ מחדש</button></div>`;
