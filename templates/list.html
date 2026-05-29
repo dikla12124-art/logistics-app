@@ -607,6 +607,7 @@ function renderCarView(){
     const car=cars[cname];
     html+=`<div class="cv-car ${car.driver?'has-driver':''}">
       <div class="cv-car-title">🚗 ${cname} <span style="font-size:10px;color:rgba(255,255,255,.3);margin-right:auto">${car.people.length}/${car.capacity}</span></div>
+      ${car.dates&&car.dates.length?`<div style="font-size:10px;color:rgba(251,191,36,.6);margin-bottom:8px;display:flex;align-items:center;gap:4px">📅 ${car.dates.join(', ')}</div>`:''}
       <div class="cv-seats">`;
     car.people.forEach(person=>{
       const isDrv=car.driver===person;

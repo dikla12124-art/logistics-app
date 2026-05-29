@@ -609,26 +609,36 @@ def api_assign_cars(lid):
         rows = db.execute("SELECT * FROM list_rows WHERE list_id=?", (lid,)).fetchall()
     if not rows: return jsonify({'ok':False,'message':'אין שורות'})
 
-    seen_a, seen_r = {}, {}
-    arrive_people, return_people = [], []
+    # Group by date — each date gets its own car numbering
+    from collections import defaultdict
+    arrive_by_date = defaultdict(list)  # date -> [full_name, ...]
+    return_by_date = defaultdict(list)
+    seen_a_names, seen_r_names = set(), set()
+
     for row in rows:
         d = json.loads(row['data'])
         has_car = str(d.get('רכב חברה','')).lower() in ['כן','yes','true','1']
         full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
         arr = d.get('תאריך הגעה','').strip()
         ret = d.get('תאריך חזרה','').strip()
-        if has_car: continue
-        if arr and full and full not in seen_a:
-            seen_a[full] = None
-            arrive_people.append({'full':full,'id':row['id'],'data':d})
-        if ret and full and full not in seen_r:
-            seen_r[full] = None
-            return_people.append({'full':full,'id':row['id'],'data':d})
+        if has_car or not full: continue
+        if arr and full not in seen_a_names:
+            seen_a_names.add(full)
+            arrive_by_date[arr].append(full)
+        if ret and full not in seen_r_names:
+            seen_r_names.add(full)
+            return_by_date[ret].append(full)
 
-    arrive_people.sort(key=lambda p:p['full'])
-    return_people.sort(key=lambda p:p['full'])
-    for i,p in enumerate(arrive_people): seen_a[p['full']] = (i % car_count)+1
-    for i,p in enumerate(return_people): seen_r[p['full']] = (i % car_count)+1
+    # Assign car numbers per date
+    seen_a, seen_r = {}, {}
+    for dt, people in arrive_by_date.items():
+        people.sort()
+        for i, name in enumerate(people):
+            seen_a[name] = (i % car_count) + 1
+    for dt, people in return_by_date.items():
+        people.sort()
+        for i, name in enumerate(people):
+            seen_r[name] = (i % car_count) + 1
 
     updated = 0
     with get_db() as db:
@@ -669,6 +679,7 @@ def api_car_view(lid):
     driver_map = {f"{d['direction']}|{d['car_name']}": d['driver'] for d in drivers}
 
     arrive_assign, return_assign = {}, {}
+    arrive_dates, return_dates = {}, {}   # car_name -> set of dates
     seen_a, seen_r = set(), set()
     unassigned_arrive, unassigned_return = set(), set()
 
@@ -677,24 +688,35 @@ def api_car_view(lid):
         has_car = str(d.get('רכב חברה','')).lower() in ['כן','yes','true','1']
         full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
         if not full or has_car: continue
-        if d.get('תאריך הגעה','').strip() and full not in seen_a:
+        arr_date = d.get('תאריך הגעה','').strip()
+        ret_date = d.get('תאריך חזרה','').strip()
+        if arr_date and full not in seen_a:
             seen_a.add(full)
             car = d.get('רכב הלוך','').strip()
-            if car: arrive_assign.setdefault(car, set()).add(full)
-            else:   unassigned_arrive.add(full)
-        if d.get('תאריך חזרה','').strip() and full not in seen_r:
+            if car:
+                arrive_assign.setdefault(car, set()).add(full)
+                arrive_dates.setdefault(car, set()).add(arr_date)
+            else:
+                unassigned_arrive.add(full)
+        if ret_date and full not in seen_r:
             seen_r.add(full)
             car = d.get('רכב חזור','').strip()
-            if car: return_assign.setdefault(car, set()).add(full)
-            else:   unassigned_return.add(full)
+            if car:
+                return_assign.setdefault(car, set()).add(full)
+                return_dates.setdefault(car, set()).add(ret_date)
+            else:
+                unassigned_return.add(full)
 
     cars_arrive, cars_return = {}, {}
     for i in range(1, car_count+1):
         cname = f'רכב {i}'
         pa = sorted(arrive_assign.get(cname, set()))
         pr = sorted(return_assign.get(cname, set()))
-        cars_arrive[cname] = {'people':pa,'driver':driver_map.get(f'arrive|{cname}',''),'capacity':car_capacity,'free':max(0,car_capacity-len(pa))}
-        cars_return[cname] = {'people':pr,'driver':driver_map.get(f'return|{cname}',''),'capacity':car_capacity,'free':max(0,car_capacity-len(pr))}
+        # Sort dates nicely
+        a_dates = sorted(arrive_dates.get(cname, set()))
+        r_dates = sorted(return_dates.get(cname, set()))
+        cars_arrive[cname] = {'people':pa,'driver':driver_map.get(f'arrive|{cname}',''),'capacity':car_capacity,'free':max(0,car_capacity-len(pa)),'dates':a_dates}
+        cars_return[cname] = {'people':pr,'driver':driver_map.get(f'return|{cname}',''),'capacity':car_capacity,'free':max(0,car_capacity-len(pr)),'dates':r_dates}
 
     overflow_a = max(0, len(seen_a)-car_count*car_capacity)
     overflow_r = max(0, len(seen_r)-car_count*car_capacity)
