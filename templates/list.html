@@ -207,7 +207,7 @@ tr:hover .del-btn{opacity:1}
 <script>
 const LID={{lst.id}}, IS_ADMIN={{('true' if is_admin else 'false')}}, USERNAME={{username|tojson}};
 let lstConfig={{{'teams':lst.teams,'car_count':lst.car_count,'car_capacity':lst.car_capacity,'trial_start':lst.trial_start or '','trial_end':lst.trial_end or ''}|tojson}};
-const ADMIN_ONLY=new Set(['מספר ת"ז']), AUTO_COLS=new Set(['רכב הלוך','רכב חזור']);
+const ADMIN_ONLY=new Set(), AUTO_COLS=new Set(['רכב הלוך','רכב חזור']);
 let rows=[], activeId='table', sortCol=null, sortDir=1, search='', selRows=new Set();
 let currentIssues=[], currentRowIssues={};
 let carViewDir='arrive', carViewData=null;
@@ -252,7 +252,7 @@ function switchTab(id){
 }
 
 // ── TABLE ──────────────────────────────────────────────────────────────────────
-const COLS=[{name:'שם',type:'text'},{name:'שם משפחה',type:'text'},{name:'מספר ת"ז',type:'text',admin_only:true},{name:'צוות',type:'select',teams_col:true},{name:'תאריך הגעה',type:'date'},{name:'תאריך חזרה',type:'date'},{name:'אילוצים/הערות',type:'text'},{name:'רכב חברה',type:'status',options:'כן,לא'},{name:'רכב הלוך',type:'text',auto_col:true},{name:'רכב חזור',type:'text',auto_col:true},{name:'מספר חדר',type:'text'}];
+const COLS=[{name:'שם',type:'text'},{name:'שם משפחה',type:'text'},{name:'צוות',type:'select',teams_col:true},{name:'תאריך הגעה',type:'date'},{name:'תאריך חזרה',type:'date'},{name:'אילוצים/הערות',type:'text'},{name:'רכב חברה',type:'status',options:'כן,לא'},{name:'רכב הלוך',type:'text',auto_col:true},{name:'רכב חזור',type:'text',auto_col:true},{name:'מספר חדר',type:'text'}];
 const visCols=COLS.filter(c=>!ADMIN_ONLY.has(c.name)||IS_ADMIN);
 
 function renderTable(){
@@ -663,6 +663,37 @@ function renderCarView(){
   html+=`</div>`;
   area.innerHTML=html;
 }
+
+async function showDriverRecs(){
+  const r=await fetch('/api/lists/'+LID+'/recommend-drivers');
+  const j=await r.json(); const recs=j.recommendations||{};
+  if(!Object.keys(recs).length){toast('אין המלצות — ודאי שיש שיבוץ הלוך');return;}
+
+  let msg='🎯 המלצות נהגים:\n\n';
+  Object.entries(recs).forEach(([car,rec])=>{
+    const already=rec.already_set?` (כבר הוגדר: ${rec.already_set})`:'';
+    msg+=`${car}: ${rec.driver} — ${rec.reason}${already}\n`;
+    // Show return coverage
+    const cov=rec.return_coverage||{};
+    Object.entries(cov).forEach(([dt,people])=>{
+      if(people.length>1) msg+=`  ↩ ${dt}: ${people.join(', ')}\n`;
+    });
+    msg+='\n';
+  });
+
+  if(confirm(msg+'\nלהחיל המלצות אוטומטית?')){
+    for(const [car,rec] of Object.entries(recs)){
+      if(!rec.already_set){
+        await fetch('/api/lists/'+LID+'/car-driver',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({direction:'arrive',car_name:car,driver:rec.driver})});
+      }
+    }
+    await showCarView();
+    toast('✅ נהגים הוגדרו לפי המלצה');
+  }
+}
+
 
 async function setDriver(car,person,isCurrent){
   const dir=carViewDir;

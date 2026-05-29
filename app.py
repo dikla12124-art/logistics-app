@@ -13,7 +13,6 @@ DB = os.path.join(_data_dir, 'logistics.db')
 LOGISTICS_COLS = [
     {'name': 'שם',              'type': 'text',   'options': '', 'fixed': True},
     {'name': 'שם משפחה',        'type': 'text',   'options': '', 'fixed': True},
-    {'name': 'מספר ת"ז',        'type': 'text',   'options': '', 'fixed': True, 'admin_only': True},
     {'name': 'צוות',            'type': 'select', 'options': '', 'fixed': True, 'teams_col': True},
     {'name': 'תאריך הגעה',      'type': 'date',   'options': '', 'fixed': True},
     {'name': 'תאריך חזרה',      'type': 'date',   'options': '', 'fixed': True},
@@ -23,7 +22,7 @@ LOGISTICS_COLS = [
     {'name': 'רכב חזור',        'type': 'text',   'options': '', 'fixed': True, 'auto_col': True},
     {'name': 'מספר חדר',        'type': 'text',   'options': '', 'fixed': True},
 ]
-ADMIN_ONLY_COLS = {'מספר ת"ז'}
+ADMIN_ONLY_COLS = set()  # ת"ז הוסר
 AUTO_COLS       = {'רכב הלוך', 'רכב חזור'}
 
 # ── DB ─────────────────────────────────────────────────────────────────────────
@@ -714,6 +713,74 @@ def api_assign_cars(lid):
         'message': f'שובצו {len(person_car)} אנשים ב-{next_car_num-1} רכבים' +
                    (f' · {len(unassigned)} ללא מקום (הוסף רכבים)' if unassigned else '')
     })
+
+
+# ── API: Recommend Drivers ────────────────────────────────────────────────────
+@app.route('/api/lists/<int:lid>/recommend-drivers', methods=['GET'])
+@auth_required
+def api_recommend_drivers(lid):
+    """
+    For each arrive car, recommend the best driver:
+    - The driver's return date should match as many other passengers as possible
+    - So passengers can ride back with the same car
+    """
+    with get_db() as db:
+        rows    = db.execute("SELECT * FROM list_rows WHERE list_id=?", (lid,)).fetchall()
+        drivers = db.execute("SELECT * FROM car_drivers WHERE list_id=? AND direction='arrive'", (lid,)).fetchall()
+
+    existing_drivers = {d['car_name']: d['driver'] for d in drivers}
+
+    # Build person info
+    person_info = {}  # full_name -> {arrive_car, arrive_date, return_date}
+    for row in rows:
+        d = json.loads(row['data'])
+        has_car = str(d.get('רכב חברה','')).lower() in ['כן','yes','true','1']
+        full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
+        if not full or has_car: continue
+        arr_car  = d.get('רכב הלוך','').strip()
+        arr_date = d.get('תאריך הגעה','').strip()
+        ret_date = d.get('תאריך חזרה','').strip()
+        if full not in person_info and arr_car:
+            person_info[full] = {'car': arr_car, 'arrive_date': arr_date, 'return_date': ret_date}
+
+    # Group passengers by arrive car
+    from collections import defaultdict
+    car_passengers = defaultdict(list)  # car_name -> [person_info]
+    for name, info in person_info.items():
+        car_passengers[info['car']].append({'name': name, 'return_date': info['return_date']})
+
+    recommendations = {}
+    for car_name, passengers in car_passengers.items():
+        if not passengers: continue
+        # For each candidate driver, count how many passengers share their return date
+        best_driver = None
+        best_score  = -1
+        best_reason = ''
+        for candidate in passengers:
+            cret = candidate['return_date']
+            if not cret: continue
+            # How many OTHER passengers return on same date?
+            same_date = sum(1 for p in passengers if p['return_date'] == cret and p['name'] != candidate['name'])
+            # Score = number of passengers they can bring back
+            score = same_date
+            if score > best_score:
+                best_score  = score
+                best_driver = candidate['name']
+                best_reason = f'חוזר ב-{cret} עם עוד {same_date} נוסעים' if same_date > 0 else f'חוזר ב-{cret}'
+
+        if best_driver:
+            recommendations[car_name] = {
+                'driver': best_driver,
+                'reason': best_reason,
+                'already_set': existing_drivers.get(car_name,''),
+                'return_coverage': {
+                    rd: [p['name'] for p in passengers if p['return_date']==rd]
+                    for rd in set(p['return_date'] for p in passengers if p['return_date'])
+                }
+            }
+
+    return jsonify({'recommendations': recommendations})
+
 
 
 # ── API: Car Assignment RETURN ─────────────────────────────────────────────────
