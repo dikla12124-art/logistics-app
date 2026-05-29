@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>כניסה — ניהול לוגיסטיקה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Heebo',sans-serif;background:#0f1117;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.bg{position:fixed;inset:0;background:radial-gradient(ellipse at 30% 20%,#1a2744,transparent 60%),radial-gradient(ellipse at 70% 80%,#0d2235,transparent 60%)}
+.grid{position:fixed;inset:0;background-image:linear-gradient(rgba(99,179,237,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(99,179,237,.04) 1px,transparent 1px);background-size:40px 40px}
+.card{position:relative;z-index:10;background:rgba(255,255,255,.04);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.08);border-radius:24px;padding:44px 40px;width:100%;max-width:400px;box-shadow:0 32px 80px rgba(0,0,0,.5)}
+.logo{text-align:center;margin-bottom:28px}
+.logo-icon{font-size:46px;display:block;margin-bottom:10px}
+.logo h1{font-size:21px;font-weight:700;color:#fff}
+.logo p{font-size:13px;color:rgba(255,255,255,.35);margin-top:3px}
+.fg{margin-bottom:14px}
+label{display:block;font-size:12px;color:rgba(255,255,255,.45);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+input{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:11px;padding:12px 15px;color:#fff;font-size:14px;font-family:'Heebo',sans-serif;outline:none;transition:border .2s;direction:rtl}
+input[type=password]{letter-spacing:4px;direction:ltr;text-align:center}
+input:focus{border-color:rgba(99,179,237,.5);background:rgba(99,179,237,.05)}
+button{width:100%;background:linear-gradient(135deg,#3b82f6,#1d4ed8);border:none;border-radius:11px;padding:14px;color:#fff;font-size:14px;font-weight:700;font-family:'Heebo',sans-serif;cursor:pointer;margin-top:6px;transition:all .15s}
+button:hover{box-shadow:0 6px 20px rgba(59,130,246,.4);transform:translateY(-1px)}
+.error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:9px;padding:11px 14px;color:#fca5a5;font-size:13px;text-align:center;margin-bottom:14px}
+.hint{font-size:11px;color:rgba(255,255,255,.18);text-align:center;margin-top:14px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="bg"></div><div class="grid"></div>
+<div class="card">
+  <div class="logo">
+    <span class="logo-icon">🗂️</span>
+    <h1>ניהול לוגיסטיקה</h1>
+    <p>הזן שם וסיסמה להמשך</p>
+  </div>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post">
+    <div class="fg"><label>שם מלא</label><input type="text" name="name" placeholder="לדוגמה: דקלה אברהם" autocomplete="name"></div>
+    <div class="fg"><label>סיסמה</label><input type="password" name="password" autofocus placeholder="••••••••"></div>
+    <button type="submit">כניסה →</button>
+  </form>
+  <p class="hint">אדמין — סיסמת מנהל · משתמש רגיל — סיסמה רגילה<br>השם מופיע ביומן השינויים ובאישורים</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ניהול לוגיסטיקה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Heebo',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh;direction:rtl}
+.bg{position:fixed;inset:0;background:radial-gradient(ellipse at 20% 10%,#1a2744,transparent 50%),radial-gradient(ellipse at 80% 90%,#0d2235,transparent 50%);pointer-events:none}
+.topbar{position:sticky;top:0;z-index:100;background:rgba(15,17,23,.9);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.06);padding:0 18px;height:58px;display:flex;align-items:center;gap:10px}
+.brand{font-size:16px;font-weight:700;color:#fff;flex:1;display:flex;align-items:center;gap:8px}
+.rbadge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600}
+.r-admin{background:rgba(251,191,36,.12);color:#fbbf24;border:1px solid rgba(251,191,36,.2)}
+.r-user{background:rgba(59,130,246,.12);color:#93c5fd;border:1px solid rgba(59,130,246,.2)}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:9px;border:none;font-family:'Heebo',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;text-decoration:none}
+.btn-primary{background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff}
+.btn-primary:hover{box-shadow:0 3px 12px rgba(59,130,246,.4)}
+.btn-ghost{background:rgba(255,255,255,.06);color:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.08)}
+.btn-ghost:hover{background:rgba(255,255,255,.1)}
+main{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:26px 16px}
+.ph{margin-bottom:24px}
+.ph h2{font-size:24px;font-weight:900;color:#fff;letter-spacing:-1px}
+.ph p{color:rgba(255,255,255,.3);font-size:13px;margin-top:3px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:13px}
+.card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:20px;cursor:pointer;transition:all .18s;position:relative}
+.card:hover{border-color:rgba(59,130,246,.28);transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.3)}
+.card-icon{font-size:30px;margin-bottom:9px}
+.card-name{font-size:16px;font-weight:700;color:#fff;margin-bottom:3px}
+.card-meta{font-size:11px;color:rgba(255,255,255,.25);margin-top:4px}
+.card-footer{margin-top:12px;display:flex;align-items:center;justify-content:space-between}
+.card-actions{display:flex;gap:4px;opacity:0;transition:opacity .18s}
+.card:hover .card-actions{opacity:1}
+.ic-btn{width:26px;height:26px;border-radius:6px;border:none;background:rgba(255,255,255,.07);color:rgba(255,255,255,.45);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .14s}
+.ic-btn:hover{background:rgba(255,255,255,.13);color:#fff}
+.empty{grid-column:1/-1;text-align:center;padding:60px 20px;color:rgba(255,255,255,.22)}
+.empty .ico{font-size:52px;margin-bottom:12px;opacity:.35}
+/* modal */
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center;padding:16px}
+.mo.on{display:flex}
+.md{background:#1a1d27;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:26px;width:100%;max-width:420px}
+.md h3{font-size:17px;font-weight:700;color:#fff;margin-bottom:18px}
+.fg{margin-bottom:12px}
+.fg label{display:block;font-size:11px;color:rgba(255,255,255,.4);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.fg input{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:10px 13px;color:#fff;font-size:13px;font-family:'Heebo',sans-serif;outline:none;direction:rtl;transition:border .2s}
+.fg input:focus{border-color:rgba(59,130,246,.5)}
+.ma{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+.icon-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;margin-top:6px}
+.io{font-size:20px;width:34px;height:34px;border:1px solid rgba(255,255,255,.07);border-radius:7px;background:rgba(255,255,255,.03);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .13s}
+.io:hover,.io.sel{background:rgba(59,130,246,.13);border-color:rgba(59,130,246,.3)}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="topbar">
+  <div class="brand">🗂️ ניהול לוגיסטיקה</div>
+  <span class="rbadge {{ 'r-admin' if is_admin else 'r-user' }}">{{ '👑 '+username if is_admin else '👤 '+username }}</span>
+  {% if is_admin %}<button class="btn btn-primary" onclick="openNew()">+ רשימה חדשה</button>{% endif %}
+  <button class="btn btn-ghost" onclick="openSett()">⚙️</button>
+  <a href="/logout" class="btn btn-ghost">יציאה</a>
+</div>
+<main>
+  <div class="ph">
+    <h2>רשימות לוגיסטיות</h2>
+    <p>כל רשימה היא ניסוי / אירוע עצמאי עם הגדרות רכבים, צוותים ותאריכים משלה</p>
+  </div>
+  <div class="grid">
+    {% for l in lists %}
+    <div class="card" onclick="go({{ l.id }})">
+      <div class="card-icon">{{ l.icon or '🗂️' }}</div>
+      <div class="card-name">{{ l.name }}</div>
+      <div class="card-meta">{{ l.created_at[:10] }}{% if l.trial_start %} · {{ l.trial_start }} → {{ l.trial_end or '?' }}{% endif %}</div>
+      {% if is_admin %}
+      <div class="card-footer">
+        <span></span>
+        <div class="card-actions" onclick="event.stopPropagation()">
+          <button class="ic-btn" onclick="editList({{ l.id }},'{{ l.name|replace("'","\\'") }}','{{ (l.icon or '')|replace("'","\\'") }}')">✏️</button>
+          <button class="ic-btn" onclick="delList({{ l.id }})">🗑️</button>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="empty">
+      <div class="ico">🗂️</div>
+      <p>{% if is_admin %}לחץ "+ רשימה חדשה" כדי להתחיל{% else %}אין רשימות עדיין{% endif %}</p>
+    </div>
+    {% endfor %}
+  </div>
+</main>
+
+<div class="mo" id="newMo"><div class="md">
+  <h3 id="moTitle">רשימה חדשה</h3>
+  <div class="fg"><label>שם הרשימה / הניסוי</label><input id="newName" placeholder="לדוגמה: ניסוי יוני 2027"></div>
+  <div class="fg"><label>סמל</label><div class="icon-grid" id="iconGrid"></div></div>
+  <div class="ma">
+    <button class="btn btn-ghost" onclick="cl('newMo')">ביטול</button>
+    <button class="btn btn-primary" onclick="save()">צור רשימה</button>
+  </div>
+</div></div>
+
+<div class="mo" id="settMo"><div class="md">
+  <h3>הגדרות</h3>
+  <div class="fg"><label>סיסמה חדשה (משתמשים)</label><input type="password" id="newPw" placeholder="השאר ריק לאי-שינוי"></div>
+  <div class="fg"><label>סיסמת אדמין חדשה</label><input type="password" id="newAdminPw" placeholder="השאר ריק לאי-שינוי"></div>
+  <div class="ma">
+    <button class="btn btn-ghost" onclick="cl('settMo')">ביטול</button>
+    <button class="btn btn-primary" onclick="saveSett()">שמור</button>
+  </div>
+</div></div>
+
+<script>
+const ICONS=['🗂️','📋','🏨','🚗','👤','✈️','🗓️','📍','✅','💼','🎯','📝','🏷️','⭐','🚀','🏢','🎪','📊'];
+let selIcon='🗂️', editId=null;
+
+function initIconGrid(){
+  const g=document.getElementById('iconGrid'); g.innerHTML='';
+  ICONS.forEach(ic=>{
+    const b=document.createElement('div'); b.className='io'+(ic===selIcon?' sel':''); b.textContent=ic;
+    b.onclick=()=>{selIcon=ic;g.querySelectorAll('.io').forEach(x=>x.classList.remove('sel'));b.classList.add('sel');};
+    g.appendChild(b);
+  });
+}
+
+function go(id){location.href='/list/'+id}
+function openNew(){editId=null;selIcon='🗂️';document.getElementById('moTitle').textContent='רשימה חדשה';document.getElementById('newName').value='';initIconGrid();op('newMo');}
+function editList(id,name,icon){editId=id;selIcon=icon||'🗂️';document.getElementById('moTitle').textContent='עריכה';document.getElementById('newName').value=name;initIconGrid();op('newMo');}
+async function save(){
+  const name=document.getElementById('newName').value.trim();if(!name)return alert('נא להזין שם');
+  const url=editId?`/api/lists/${editId}`:'/api/lists';
+  const method=editId?'PUT':'POST';
+  await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify({name,icon:selIcon})});
+  location.reload();
+}
+async function delList(id){if(!confirm('למחוק?'))return;await fetch('/api/lists/'+id,{method:'DELETE'});location.reload();}
+function openSett(){op('settMo');}
+async function saveSett(){
+  const p={};
+  const pw=document.getElementById('newPw').value; const apw=document.getElementById('newAdminPw').value;
+  if(pw)p.password=pw; if(apw)p.admin_password=apw;
+  if(!Object.keys(p).length)return cl('settMo');
+  const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+  const j=await r.json(); if(j.error)alert('נדרשות הרשאות אדמין'); else{alert('נשמר!');cl('settMo');}
+}
+function op(id){document.getElementById(id).classList.add('on')}
+function cl(id){document.getElementById(id).classList.remove('on')}
+document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('on')}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'))});
+</script>
+</body>
+</html>
