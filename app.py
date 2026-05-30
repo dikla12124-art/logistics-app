@@ -205,10 +205,13 @@ def admin_required(f):
 @app.route('/')
 @auth_required
 def index():
+    from flask import make_response
     with get_db() as db:
         lists = db.execute("SELECT * FROM lists ORDER BY created_at DESC").fetchall()
-    return render_template('index.html', lists=lists,
-                           username=session.get('username',''), is_admin=is_admin())
+    resp = make_response(render_template('index.html', lists=lists,
+                           username=session.get('username',''), is_admin=is_admin()))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    return resp
 
 @app.route('/list/<int:lid>')
 @auth_required

@@ -129,7 +129,7 @@ function openNew(){editId=null;selIcon='🗂️';document.getElementById('moTitl
 function editList(id,name,icon){editId=id;selIcon=icon||'🗂️';document.getElementById('moTitle').textContent='עריכה';document.getElementById('newName').value=name;initIconGrid();op('newMo');}
 async function save(){
   const name=document.getElementById('newName').value.trim();if(!name)return alert('נא להזין שם');
-  const url=editId?`/api/lists/${editId}`:'/api/lists';
+  const url=editId?('/api/lists/'+editId):'/api/lists';
   const method=editId?'PUT':'POST';
   await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify({name,icon:selIcon})});
   location.reload();
@@ -221,7 +221,7 @@ async function delUser(id){
 <div class="mo" id="usersMo"><div class="md" style="max-width:560px">
   <h3>👥 ניהול משתמשים</h3>
 
-  <!-- Pending approval -->
+  <!-- Pending approval v3 -->
   <div id="pendingSection" style="display:none;margin-bottom:16px">
     <div style="font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:8px">⏳ ממתינים לאישור</div>
     <div id="pendingList"></div>
