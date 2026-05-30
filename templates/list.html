@@ -610,6 +610,7 @@ async function showCarView(){
   carViewData=await r.json(); renderCarView();
 }
 
+function setDir(dir){carViewDir=dir;renderCarView();}
 function renderCarView(){
   const d=carViewData; const area=document.getElementById('mainArea');
   const cars=carViewDir==='arrive'?d.cars_arrive:d.cars_return;
@@ -621,8 +622,8 @@ function renderCarView(){
 
   // Direction toggle
   html+='<div class="cv-dir-toggle" style="margin-bottom:12px">';
-  html+='<button class="cv-dir-btn '+(isArrive?'active':'')+'" onclick="carViewDir='arrive';renderCarView()">✈️ הגעה ('+d.total_arrive+')</button>';
-  html+='<button class="cv-dir-btn '+(!isArrive?'active':'')+'" onclick="carViewDir='return';renderCarView()">🏠 חזרה ('+d.total_return+')</button>';
+  html+='<button class="cv-dir-btn '+(isArrive?'active':'')+'" onclick="setDir(\u0027arrive\u0027)">✈️ הגעה ('+d.total_arrive+')</button>';
+  html+='<button class="cv-dir-btn '+(!isArrive?'active':'')+'" onclick="setDir(\u0027return\u0027)">🏠 חזרה ('+d.total_return+')</button>';
   html+='</div>';
 
   // Tips / action buttons
