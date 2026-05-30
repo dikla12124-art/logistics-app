@@ -87,6 +87,14 @@ def init_db():
                 key   TEXT PRIMARY KEY,
                 value TEXT
             );
+            CREATE TABLE IF NOT EXISTS users (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                username   TEXT NOT NULL UNIQUE,
+                password   TEXT NOT NULL,
+                role       TEXT DEFAULT 'user',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
         ''')
         import os as _os
         defaults = [
@@ -803,6 +811,7 @@ def api_assign_cars_return(lid):
         if full: person_data[full] = d
 
     # car_name -> (driver_name, driver_return_date)
+    # Also inherit arrive drivers for return assignment
     car_info = {}
     for drv in drivers:
         dname = drv['driver']
@@ -1094,6 +1103,57 @@ def api_changelog(lid):
     with get_db() as db:
         logs=db.execute("SELECT * FROM changes_log WHERE list_id=? ORDER BY created_at DESC LIMIT 200",(lid,)).fetchall()
     return jsonify([dict(l) for l in logs])
+
+# ── API: Users (admin only) ────────────────────────────────────────────────────
+@app.route('/api/users', methods=['GET'])
+@admin_required
+def api_get_users():
+    with get_db() as db:
+        users = db.execute("SELECT id,name,username,role,created_at FROM users ORDER BY id").fetchall()
+    return jsonify([dict(u) for u in users])
+
+@app.route('/api/users', methods=['POST'])
+@admin_required
+def api_create_user():
+    d = request.json
+    name     = d.get('name','').strip()
+    username = d.get('username','').strip()
+    password = d.get('password','').strip()
+    if not name or not password:
+        return jsonify({'error':'שם וסיסמה הם שדות חובה'}), 400
+    if not username:
+        username = name
+    try:
+        with get_db() as db:
+            cur = db.execute("INSERT INTO users (name,username,password,role) VALUES (?,?,?,?)",
+                             (name, username, password, 'user'))
+            db.commit()
+        return jsonify({'ok':True,'id':cur.lastrowid})
+    except Exception as e:
+        return jsonify({'error':str(e)}), 400
+
+@app.route('/api/users/<int:uid>', methods=['PUT'])
+@admin_required
+def api_update_user(uid):
+    d = request.json
+    with get_db() as db:
+        if d.get('password'):
+            db.execute("UPDATE users SET name=?,password=? WHERE id=?",
+                       (d['name'], d['password'], uid))
+        else:
+            db.execute("UPDATE users SET name=? WHERE id=?", (d['name'], uid))
+        db.commit()
+    return jsonify({'ok':True})
+
+@app.route('/api/users/<int:uid>', methods=['DELETE'])
+@admin_required
+def api_delete_user(uid):
+    with get_db() as db:
+        db.execute("DELETE FROM users WHERE id=?", (uid,))
+        db.commit()
+    return jsonify({'ok':True})
+
+
 
 # ── API: Settings ──────────────────────────────────────────────────────────────
 @app.route('/api/settings', methods=['POST'])

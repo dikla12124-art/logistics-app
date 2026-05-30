@@ -58,6 +58,7 @@ main{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:26px 16px
   <span class="rbadge {{ 'r-admin' if is_admin else 'r-user' }}">{{ '👑 '+username if is_admin else '👤 '+username }}</span>
   {% if is_admin %}<button class="btn btn-primary" onclick="openNew()">+ רשימה חדשה</button>{% endif %}
   <button class="btn btn-ghost" onclick="openSett()">⚙️</button>
+  {% if is_admin %}<button class="btn btn-ghost" onclick="openUsers()">👥 משתמשים</button>{% endif %}
   <a href="/logout" class="btn btn-ghost">יציאה</a>
 </div>
 <main>
@@ -147,6 +148,56 @@ function op(id){document.getElementById(id).classList.add('on')}
 function cl(id){document.getElementById(id).classList.remove('on')}
 document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('on')}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'))});
+
+async function openUsers(){
+  op('usersMo'); await loadUsers();
+}
+async function loadUsers(){
+  const r=await fetch('/api/users'); const users=await r.json();
+  const el=document.getElementById('usersList');
+  if(!users.length){el.innerHTML='<p style="font-size:12px;color:rgba(255,255,255,.3)">אין משתמשים עדיין</p>';return;}
+  el.innerHTML=users.map(u=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+      <span style="font-size:13px;color:#e2e8f0;flex:1">👤 ${u.name}</span>
+      <span style="font-size:10px;color:rgba(255,255,255,.3)">${u.created_at.slice(0,10)}</span>
+      <button class="btn btn-danger" style="padding:3px 8px;font-size:11px" onclick="delUser(${u.id},'${u.name.replace(/'/g,"\'")}')">מחק</button>
+    </div>`).join('');
+}
+async function addUser(){
+  const name=document.getElementById('uName').value.trim();
+  const pw=document.getElementById('uPw').value.trim();
+  if(!name||!pw){alert('נא למלא שם וסיסמה');return;}
+  const r=await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,username:name,password:pw})});
+  const j=await r.json();
+  if(j.ok){
+    document.getElementById('uName').value='';document.getElementById('uPw').value='';
+    const m=document.getElementById('uMsg');m.textContent='✅ '+name+' נוסף/ה';m.style.display='inline';
+    setTimeout(()=>m.style.display='none',3000);
+    await loadUsers();
+  } else alert('❌ '+(j.error||'שגיאה'));
+}
+async function delUser(id,name){
+  if(!confirm('למחוק את '+name+'?'))return;
+  await fetch('/api/users/'+id,{method:'DELETE'}); await loadUsers();
+}
+
 </script>
+<div class="mo" id="usersMo"><div class="md" style="max-width:520px">
+  <h3>👥 ניהול משתמשים</h3>
+  <div id="usersList" style="margin-bottom:16px;max-height:240px;overflow-y:auto"></div>
+  <div style="border-top:1px solid rgba(255,255,255,.08);padding-top:14px">
+    <p style="font-size:12px;color:rgba(255,255,255,.4);margin-bottom:10px">הוסף משתמש חדש</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="fg" style="flex:1;margin:0;min-width:120px"><label>שם מלא</label><input id="uName" placeholder="דקלה אברהם"></div>
+      <div class="fg" style="flex:1;margin:0;min-width:120px"><label>סיסמה אישית</label><input id="uPw" type="password" placeholder="סיסמה לכניסה"></div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-primary" onclick="addUser()">+ הוסף</button>
+      <span id="uMsg" style="font-size:12px;color:#86efac;display:none"></span>
+    </div>
+  </div>
+  <div class="ma"><button class="btn btn-ghost" onclick="cl('usersMo')">סגור</button></div>
+</div></div>
+
 </body>
 </html>
