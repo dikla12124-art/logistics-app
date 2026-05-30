@@ -93,6 +93,7 @@ def init_db():
                 username   TEXT NOT NULL UNIQUE,
                 password   TEXT NOT NULL,
                 role       TEXT DEFAULT 'user',
+                approved   INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now'))
             );
         ''')
@@ -214,8 +215,11 @@ def index():
 def list_view(lid):
     lst = get_list(lid)
     if not lst: return redirect(url_for('index'))
-    lst['columns'] = json.loads(lst['columns'])
-    lst['teams']   = json.loads(lst['teams'])
+    lst['columns']      = json.loads(lst['columns'])
+    lst['teams']        = json.loads(lst['teams'])
+    lst['teams_json']   = json.dumps(lst['teams'],  ensure_ascii=False)
+    lst['trial_start']  = lst['trial_start'] or ''
+    lst['trial_end']    = lst['trial_end']   or ''
     return render_template('list.html', lst=lst,
                            username=session.get('username',''), is_admin=is_admin())
 
@@ -1109,7 +1113,7 @@ def api_changelog(lid):
 @admin_required
 def api_get_users():
     with get_db() as db:
-        users = db.execute("SELECT id,name,username,role,created_at FROM users ORDER BY id").fetchall()
+        users = db.execute("SELECT id,name,username,role,approved,created_at FROM users ORDER BY id").fetchall()
     return jsonify([dict(u) for u in users])
 
 @app.route('/api/users', methods=['POST'])
@@ -1125,8 +1129,8 @@ def api_create_user():
         username = name
     try:
         with get_db() as db:
-            cur = db.execute("INSERT INTO users (name,username,password,role) VALUES (?,?,?,?)",
-                             (name, username, password, 'user'))
+            cur = db.execute("INSERT INTO users (name,username,password,role,approved) VALUES (?,?,?,?,?)",
+                             (name, username, password, 'user', 1))
             db.commit()
         return jsonify({'ok':True,'id':cur.lastrowid})
     except Exception as e:
@@ -1153,6 +1157,24 @@ def api_delete_user(uid):
         db.commit()
     return jsonify({'ok':True})
 
+
+
+# ── API: Approve / Reject User ─────────────────────────────────────────────────
+@app.route('/api/users/<int:uid>/approve', methods=['POST'])
+@admin_required
+def api_approve_user(uid):
+    with get_db() as db:
+        db.execute("UPDATE users SET approved=1 WHERE id=?", (uid,))
+        db.commit()
+    return jsonify({'ok': True})
+
+@app.route('/api/users/<int:uid>/reject', methods=['POST'])
+@admin_required
+def api_reject_user(uid):
+    with get_db() as db:
+        db.execute("DELETE FROM users WHERE id=?", (uid,))
+        db.commit()
+    return jsonify({'ok': True})
 
 
 # ── API: Settings ──────────────────────────────────────────────────────────────

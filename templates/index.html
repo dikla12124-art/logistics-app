@@ -153,15 +153,44 @@ async function openUsers(){
   op('usersMo'); await loadUsers();
 }
 async function loadUsers(){
-  const r=await fetch('/api/users'); const users=await r.json();
+  const r=await fetch('/api/users'); const all=await r.json();
+  const pending=all.filter(u=>!u.approved);
+  const approved=all.filter(u=>u.approved);
+
+  // Pending section
+  const ps=document.getElementById('pendingSection');
+  const pl=document.getElementById('pendingList');
+  if(pending.length){
+    ps.style.display='block';
+    pl.innerHTML=pending.map(u=>
+      '<div style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.15);margin-bottom:6px">'+
+      '<span style="font-size:13px;color:#fde68a;flex:1">👤 '+u.name+'</span>'+
+      '<span style="font-size:10px;color:rgba(255,255,255,.3)">'+u.created_at.slice(0,10)+'</span>'+
+      '<button class="btn btn-green" style="padding:3px 9px;font-size:11px" onclick="approveUser('+u.id+')">✅ אשר</button>'+
+      '<button class="btn btn-danger" style="padding:3px 9px;font-size:11px" onclick="rejectUser('+u.id+',''+u.name.replace(/'/g,"\'")+'')" >✗ דחה</button>'+
+      '</div>'
+    ).join('');
+  } else {
+    ps.style.display='none';
+  }
+
+  // Approved list
   const el=document.getElementById('usersList');
-  if(!users.length){el.innerHTML='<p style="font-size:12px;color:rgba(255,255,255,.3)">אין משתמשים עדיין</p>';return;}
-  el.innerHTML=users.map(u=>`
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)">
-      <span style="font-size:13px;color:#e2e8f0;flex:1">👤 ${u.name}</span>
-      <span style="font-size:10px;color:rgba(255,255,255,.3)">${u.created_at.slice(0,10)}</span>
-      <button class="btn btn-danger" style="padding:3px 8px;font-size:11px" onclick="delUser(${u.id},'${u.name.replace(/'/g,"\'")}')">מחק</button>
-    </div>`).join('');
+  if(!approved.length){el.innerHTML='<p style="font-size:12px;color:rgba(255,255,255,.3)">אין משתמשים מאושרים עדיין</p>';return;}
+  el.innerHTML=approved.map(u=>
+    '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+
+    '<span style="font-size:13px;color:#e2e8f0;flex:1">👤 '+u.name+'</span>'+
+    '<span style="font-size:10px;color:rgba(255,255,255,.3)">'+u.created_at.slice(0,10)+'</span>'+
+    '<button class="btn btn-danger" style="padding:3px 8px;font-size:11px" onclick="delUser('+u.id+',''+u.name.replace(/'/g,"\'")+'')">מחק</button>'+
+    '</div>'
+  ).join('');
+}
+async function approveUser(id){
+  await fetch('/api/users/'+id+'/approve',{method:'POST'}); await loadUsers();
+}
+async function rejectUser(id,name){
+  if(!confirm('לדחות את '+name+'?'))return;
+  await fetch('/api/users/'+id+'/reject',{method:'POST'}); await loadUsers();
 }
 async function addUser(){
   const name=document.getElementById('uName').value.trim();
@@ -182,14 +211,25 @@ async function delUser(id,name){
 }
 
 </script>
-<div class="mo" id="usersMo"><div class="md" style="max-width:520px">
+<div class="mo" id="usersMo"><div class="md" style="max-width:560px">
   <h3>👥 ניהול משתמשים</h3>
-  <div id="usersList" style="margin-bottom:16px;max-height:240px;overflow-y:auto"></div>
+
+  <!-- Pending approval -->
+  <div id="pendingSection" style="display:none;margin-bottom:16px">
+    <div style="font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:8px">⏳ ממתינים לאישור</div>
+    <div id="pendingList"></div>
+  </div>
+
+  <!-- Approved users -->
+  <div style="font-size:12px;font-weight:700;color:rgba(255,255,255,.5);margin-bottom:8px">✅ משתמשים מאושרים</div>
+  <div id="usersList" style="margin-bottom:16px;max-height:200px;overflow-y:auto"></div>
+
+  <!-- Add new user -->
   <div style="border-top:1px solid rgba(255,255,255,.08);padding-top:14px">
-    <p style="font-size:12px;color:rgba(255,255,255,.4);margin-bottom:10px">הוסף משתמש חדש</p>
+    <p style="font-size:12px;color:rgba(255,255,255,.4);margin-bottom:10px">➕ הוסף משתמש ידנית</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <div class="fg" style="flex:1;margin:0;min-width:120px"><label>שם מלא</label><input id="uName" placeholder="דקלה אברהם"></div>
-      <div class="fg" style="flex:1;margin:0;min-width:120px"><label>סיסמה אישית</label><input id="uPw" type="password" placeholder="סיסמה לכניסה"></div>
+      <div class="fg" style="flex:1;margin:0;min-width:120px"><label>שם מלא</label><input id="uName" placeholder="ישראל ישראלי"></div>
+      <div class="fg" style="flex:1;margin:0;min-width:120px"><label>סיסמה אישית</label><input id="uPw" placeholder="סיסמה לכניסה"></div>
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
       <button class="btn btn-primary" onclick="addUser()">+ הוסף</button>

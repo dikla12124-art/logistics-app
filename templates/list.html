@@ -206,7 +206,7 @@ tr:hover .del-btn{opacity:1}
 
 <script>
 const LID={{lst.id}}, IS_ADMIN={{('true' if is_admin else 'false')}}, USERNAME={{username|tojson}};
-let lstConfig={{{'teams':lst.teams,'car_count':lst.car_count,'car_capacity':lst.car_capacity,'trial_start':lst.trial_start or '','trial_end':lst.trial_end or ''}|tojson}};
+let lstConfig={teams:{{lst.teams_json|safe}},car_count:{{lst.car_count}},car_capacity:{{lst.car_capacity}},trial_start:{{lst.trial_start|tojson}},trial_end:{{lst.trial_end|tojson}}};
 const ADMIN_ONLY=new Set(), AUTO_COLS=new Set(['רכב הלוך','רכב חזור']);
 let rows=[], activeId='table', sortCol=null, sortDir=1, search='', selRows=new Set();
 let currentIssues=[], currentRowIssues={};
