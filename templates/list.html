@@ -152,6 +152,7 @@ tr:hover .del-btn{opacity:1}
 .cv-dir-col{}
 .cv-dir-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.35);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;text-transform:uppercase;letter-spacing:.4px}
 .cv-dir-count{background:rgba(255,255,255,.06);border-radius:10px;padding:1px 6px;font-size:10px}
+.cv-date-badge{font-size:9px;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:1px 7px;color:#93c5fd;font-weight:700;letter-spacing:.2px}
 @media(max-width:480px){.cv-dirs{grid-template-columns:1fr}.cv-cars-combined{grid-template-columns:1fr}}
 /* changelog */
 .lw{padding:2px 0}.li{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start}
@@ -420,10 +421,17 @@ function toast(msg){
 
 // Car assign
 async function assignCars(){
-  if(!confirm(`לשבץ רכבים? ${lstConfig.car_count} רכבים × ${lstConfig.car_capacity} מקומות`))return;
+  if(!confirm('לשבץ רכבים לפי נהגים ותאריכים?'))return;
+  toast('⏳ משבץ...');
   const r=await fetch('/api/lists/'+LID+'/assign-cars',{method:'POST'});
   const j=await r.json();
-  if(j.ok){await loadRows();renderTable();toast(`✅ שובצו ${j.updated} שיבוצים`);}
+  if(j.ok){
+    await loadRows();
+    if(activeId==='carview') await showCarView(); else renderTable();
+    const ua=j.unassigned_arrive||0, ur=j.unassigned_return||0;
+    const warn=ua||ur ? ` · ⚠️ ${ua} להגעה/${ur} לחזרה ללא שיבוץ`:'';
+    toast(`✅ ${j.drivers} נהגים · ${j.assigned_arrive} להגעה · ${j.assigned_return} לחזרה${warn}`);
+  }
 }
 
 // ── ADMIN PANEL ────────────────────────────────────────────────────────────────
@@ -605,6 +613,8 @@ async function showCarView(){
   carViewData=await r.json(); renderCarView();
 }
 
+function fmtDate(d){if(!d)return '';const p=d.split('-');return p.length===3?`${p[2]}/${p[1]}`:d;}
+
 function renderPassengers(people, capacity, driver){
   let html='<div class="cv-seats">';
   people.forEach(person=>{
@@ -662,11 +672,11 @@ function renderCarView(){
       </div>
       <div class="cv-dirs">
         <div class="cv-dir-col">
-          <div class="cv-dir-label">✈️ הגעה <span class="cv-dir-count">${carA.people.length}/${carA.capacity}</span></div>
+          <div class="cv-dir-label">✈️ הגעה ${carA.date?`<span class="cv-date-badge">${fmtDate(carA.date)}</span>`:''} <span class="cv-dir-count">${carA.people.length}/${carA.capacity}</span></div>
           ${renderPassengers(carA.people,carA.capacity,driver)}
         </div>
         <div class="cv-dir-col">
-          <div class="cv-dir-label">🏠 חזרה <span class="cv-dir-count">${carR.people.length}/${carR.capacity}</span></div>
+          <div class="cv-dir-label">🏠 חזרה ${carR.date?`<span class="cv-date-badge">${fmtDate(carR.date)}</span>`:''} <span class="cv-dir-count">${carR.people.length}/${carR.capacity}</span></div>
           ${renderPassengers(carR.people,carR.capacity,driver)}
         </div>
       </div>
