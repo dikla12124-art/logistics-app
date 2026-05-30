@@ -167,7 +167,7 @@ async function loadUsers(){
       '<span style="font-size:13px;color:#fde68a;flex:1">👤 '+u.name+'</span>'+
       '<span style="font-size:10px;color:rgba(255,255,255,.3)">'+u.created_at.slice(0,10)+'</span>'+
       '<button class="btn btn-green" style="padding:3px 9px;font-size:11px" onclick="approveUser('+u.id+')">✅ אשר</button>'+
-      '<button class="btn btn-danger" style="padding:3px 9px;font-size:11px" onclick="rejectUser('+u.id+',''+u.name.replace(/'/g,"\'")+'')" >✗ דחה</button>'+
+      '<button class="btn btn-danger" style="padding:3px 9px;font-size:11px" onclick="rejectUser('+u.id+')">✗ דחה</button>'+
       '</div>'
     ).join('');
   } else {
@@ -188,8 +188,8 @@ async function loadUsers(){
 async function approveUser(id){
   await fetch('/api/users/'+id+'/approve',{method:'POST'}); await loadUsers();
 }
-async function rejectUser(id,name){
-  if(!confirm('לדחות את '+name+'?'))return;
+async function rejectUser(id){
+  if(!confirm('לדחות משתמש זה?'))return;
   await fetch('/api/users/'+id+'/reject',{method:'POST'}); await loadUsers();
 }
 async function addUser(){
