@@ -605,8 +605,13 @@ async function doFix(idx){
 // ── CAR VIEW ───────────────────────────────────────────────────────────────────
 async function showCarView(){
   document.getElementById('mainArea').innerHTML='<div style="text-align:center;padding:30px;color:rgba(255,255,255,.3);font-size:12px">⏳ טוען...</div>';
-  const r=await fetch('/api/lists/'+LID+'/car-view');
-  carViewData=await r.json(); renderCarView();
+  const [r1,r2]=await Promise.all([
+    fetch('/api/lists/'+LID+'/car-view'),
+    fetch('/api/lists/'+LID+'/recommend-drivers')
+  ]);
+  carViewData=await r1.json();
+  carViewData._recs=(await r2.json()).recommendations||{};
+  renderCarView();
 }
 
 function setDir(dir){carViewDir=dir;renderCarView();}
@@ -629,7 +634,6 @@ function renderCarView(){
   if(isArrive&&IS_ADMIN){
     html+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">';
     html+='<span style="font-size:11px;color:rgba(251,191,36,.6)">💡 בחר נהג לכל רכב, ואז לחץ שבץ חזור</span>';
-    html+='<button class="btn btn-amber btn-sm" onclick="showDriverRecs()">🎯 המלץ נהגים</button>';
     html+='</div>';
   }
   if(!isArrive&&IS_ADMIN){
@@ -650,7 +654,14 @@ function renderCarView(){
   Object.entries(cars).forEach(function([cname,car]){
     html+='<div class="cv-car '+(car.driver?'has-driver':'')+'">';
     html+='<div class="cv-car-title">🚗 '+cname+' <span style="font-size:10px;color:rgba(255,255,255,.3);margin-right:auto">'+car.people.length+'/'+car.capacity+'</span></div>';
-    html+='<div style="font-size:11px;color:rgba(251,191,36,.7);margin-bottom:7px">📅 '+(car.date||'—')+'</div>';
+    html+='<div style="font-size:11px;color:rgba(251,191,36,.7);margin-bottom:5px">📅 '+(car.date||'—')+'</div>';
+    if(isArrive&&carViewData._recs&&carViewData._recs[cname]){
+      const rec=carViewData._recs[cname];
+      const alreadySet=!!car.driver;
+      html+='<div style="font-size:10px;margin-bottom:7px;padding:3px 7px;border-radius:5px;background:rgba(34,197,94,.08);color:'+(alreadySet?'rgba(134,239,172,.5)':'#86efac')+'">';
+      html+='🎯 '+(alreadySet?'נהג: '+car.driver:'מומלץ: '+rec.driver)+' — '+rec.reason;
+      html+='</div>';
+    }
     html+='<div class="cv-seats">';
     car.people.forEach(function(person){
       const isDrv=car.driver===person;
