@@ -675,191 +675,159 @@ def _write_car(lid, row_id, car_name, direction, driver_name, now):
                            (lid, dr, car_name, driver_name))
             db.commit()
 
-# ── API: Step 1 — שיבוץ אחיד (round trips) ────────────────────────────────────
+# ── helpers for step assignment ───────────────────────────────────────────────
+def _pool_cars(lid, people):
+    """Return dict: car_name -> {arrive_count, return_count, arrive_date, return_date}"""
+    from collections import defaultdict
+    lst = get_list(lid)
+    car_count    = max(1, lst['car_count'])
+    car_capacity = max(1, lst['car_capacity'])
+    pool = {}
+    for i in range(1, car_count + 1):
+        cname = f'רכב {i}'
+        pool[cname] = {'arrive_count':0, 'return_count':0,
+                       'arrive_date':'', 'return_date':'',
+                       'capacity': car_capacity}
+    for p in people:
+        if p['car_a'] and p['car_a'] in pool:
+            pool[p['car_a']]['arrive_count'] += 1
+            if not pool[p['car_a']]['arrive_date'] and p['arrival']:
+                pool[p['car_a']]['arrive_date'] = p['arrival']
+        if p['car_r'] and p['car_r'] in pool:
+            pool[p['car_r']]['return_count'] += 1
+            if not pool[p['car_r']]['return_date'] and p['departure']:
+                pool[p['car_r']]['return_date'] = p['departure']
+    return pool
+
+# ── API: Step 1 — שיבוץ אחיד ──────────────────────────────────────────────────
 @app.route('/api/lists/<int:lid>/assign-step1', methods=['POST'])
 @admin_required
 def api_assign_step1(lid):
-    """Assign everyone with matching arrive+return date into same car(s)."""
+    """Assign round-trip people (same arrive+return date) into pool cars."""
     from collections import defaultdict
-    lst = get_list(lid)
-    cap = max(1, lst['car_capacity'])
-    now = datetime.now().isoformat()
-    next_num = _next_car_num(lid)
+    lst      = get_list(lid)
+    cap      = max(1, lst['car_capacity'])
+    now      = datetime.now().isoformat()
     people   = _car_people(lid)
+    pool     = _pool_cars(lid, people)
 
-    # Only people with BOTH dates and NOT yet assigned
     combo = defaultdict(list)
     for p in people:
         if p['arrival'] and p['departure'] and not p['car_a'] and not p['car_r']:
             combo[(p['arrival'], p['departure'])].append(p)
 
-    cars_created = 0
-    assigned     = 0
+    if not combo:
+        return jsonify({'ok':True,'assigned':0,'message':'לא נמצאו אנשים עם שני תאריכים ללא שיבוץ'})
 
-    for (arr, ret), grp in sorted(combo.items(), key=lambda x: -len(x[1])):
-        pool = list(grp)
-        while pool:
-            drv = pool.pop(0)
-            cname = f'רכב {next_num}'; next_num += 1
-            cars_created += 1
-            # driver gets both directions
+    assigned = 0
+    # cars available for round-trip: empty cars first
+    avail = [cn for cn,c in pool.items() if c['arrive_count']==0 and c['return_count']==0]
+
+    car_idx = 0
+    for (arr,ret), grp in sorted(combo.items(), key=lambda x: -len(x[1])):
+        pool_of_grp = list(grp)
+        while pool_of_grp:
+            if car_idx >= len(avail): break
+            cname = avail[car_idx]; car_idx += 1
+            drv   = pool_of_grp.pop(0)
             _write_car(lid, drv['id'], cname, 'both', drv['full'], now)
             assigned += 1
-            # fill passengers (both directions)
             pax = 0
-            for p in pool[:]:
-                if pax < cap - 1:
+            for p in pool_of_grp[:]:
+                if pax < cap-1:
                     _write_car(lid, p['id'], cname, 'both', None, now)
-                    pool.remove(p); assigned += 1; pax += 1
-                else:
-                    break
+                    pool_of_grp.remove(p); assigned += 1; pax += 1
+                else: break
 
-    return jsonify({'ok': True, 'cars_created': cars_created, 'assigned': assigned,
-                    'next_step': 'assign-step2'})
+    return jsonify({'ok':True,'assigned':assigned})
 
 # ── API: Step 2 — שיבוץ הלוך ──────────────────────────────────────────────────
 @app.route('/api/lists/<int:lid>/assign-step2', methods=['POST'])
 @admin_required
 def api_assign_step2(lid):
-    """Assign remaining unassigned-arrive people by arrival date."""
+    """Assign remaining people without arrive-car, by arrival date."""
     from collections import defaultdict
-    lst = get_list(lid)
-    cap = max(1, lst['car_capacity'])
-    now = datetime.now().isoformat()
+    lst    = get_list(lid)
+    cap    = max(1, lst['car_capacity'])
+    now    = datetime.now().isoformat()
     people = _car_people(lid)
+    pool   = _pool_cars(lid, people)
 
-    # People without הלוך assignment who have an arrival date
     unassigned = [p for p in people if not p['car_a'] and p['arrival']]
     if not unassigned:
-        return jsonify({'ok': True, 'assigned': 0, 'message': 'כולם כבר שובצו להגעה'})
+        return jsonify({'ok':True,'assigned':0,'message':'כולם שובצו להגעה'})
 
-    # Existing cars by arrive_date (with space)
-    with get_db() as db:
-        drivers = db.execute("SELECT * FROM car_drivers WHERE list_id=? AND direction='arrive'",
-                             (lid,)).fetchall()
-    existing = {d['car_name']: d['driver'] for d in drivers}
-
-    # Count current occupancy per arrive car
-    occupancy = defaultdict(int)
-    for p in people:
-        if p['car_a']: occupancy[p['car_a']] += 1
-
-    # Build existing arrive cars: {car_name: {date, occupancy}}
-    arrive_cars = {}
-    for p in people:
-        if p['car_a'] and p['arrival']:
-            if p['car_a'] not in arrive_cars:
-                arrive_cars[p['car_a']] = {'date': p['arrival'], 'count': 0}
-            arrive_cars[p['car_a']]['count'] += 1
-
-    next_num = _next_car_num(lid)
-    assigned = 0
-    cars_created = 0
-
-    # Group unassigned by arrival date
     by_date = defaultdict(list)
     for p in unassigned:
         by_date[p['arrival']].append(p)
 
-    for arr_date, grp in sorted(by_date.items()):
-        pool = list(grp)
-        # First: try filling existing cars on this date
-        for cname, info in arrive_cars.items():
-            if info['date'] == arr_date:
-                while pool and info['count'] < cap:
-                    p = pool.pop(0)
+    assigned = 0
+    for arr, grp in sorted(by_date.items()):
+        pool_of_grp = list(grp)
+        # Try existing cars with matching arrive_date and space
+        for cname, c in pool.items():
+            if not pool_of_grp: break
+            if c['arrive_date']==arr and c['arrive_count'] < cap:
+                while pool_of_grp and c['arrive_count'] < cap:
+                    p = pool_of_grp.pop(0)
                     _write_car(lid, p['id'], cname, 'הלוך', None, now)
-                    info['count'] += 1; assigned += 1
-        # Then: create new cars for remaining
-        while pool:
-            drv = pool.pop(0)
-            cname = f'רכב {next_num}'; next_num += 1
-            cars_created += 1
-            _write_car(lid, drv['id'], cname, 'הלוך', drv['full'], now)
-            assigned += 1
-            pax = 0
-            for p in pool[:]:
-                if pax < cap - 1:
+                    c['arrive_count'] += 1; assigned += 1
+        # Use empty cars for the rest
+        for cname, c in pool.items():
+            if not pool_of_grp: break
+            if c['arrive_count']==0 and c['arrive_date']=='':
+                drv = pool_of_grp.pop(0)
+                _write_car(lid, drv['id'], cname, 'הלוך', drv['full'], now)
+                c['arrive_count']=1; c['arrive_date']=arr; assigned+=1
+                while pool_of_grp and c['arrive_count'] < cap:
+                    p = pool_of_grp.pop(0)
                     _write_car(lid, p['id'], cname, 'הלוך', None, now)
-                    pool.remove(p); assigned += 1; pax += 1
-                else:
-                    break
+                    c['arrive_count'] += 1; assigned += 1
 
-    return jsonify({'ok': True, 'assigned': assigned, 'cars_created': cars_created,
-                    'next_step': 'assign-step3'})
+    return jsonify({'ok':True,'assigned':assigned})
 
 # ── API: Step 3 — שיבוץ חזור ──────────────────────────────────────────────────
 @app.route('/api/lists/<int:lid>/assign-step3', methods=['POST'])
 @admin_required
 def api_assign_step3(lid):
-    """Assign returns using existing cars. Return list of stuck people."""
+    """Assign returns using pool cars. Report stuck people."""
     from collections import defaultdict
-    lst = get_list(lid)
-    cap = max(1, lst['car_capacity'])
-    now = datetime.now().isoformat()
+    lst    = get_list(lid)
+    cap    = max(1, lst['car_capacity'])
+    now    = datetime.now().isoformat()
     people = _car_people(lid)
+    pool   = _pool_cars(lid, people)
 
-    # Reload after step2 changes
-    people = _car_people(lid)
-    unassigned_r = [p for p in people if not p['car_r'] and p['departure']]
-    if not unassigned_r:
-        return jsonify({'ok': True, 'assigned': 0, 'message': 'כולם כבר שובצו לחזרה'})
+    unassigned = [p for p in people if not p['car_r'] and p['departure']]
+    if not unassigned:
+        return jsonify({'ok':True,'assigned':0,'message':'כולם שובצו לחזרה'})
 
-    # Build existing return cars by date
-    return_cars = {}   # car_name -> {date, count}
-    for p in people:
-        if p['car_r'] and p['departure']:
-            if p['car_r'] not in return_cars:
-                return_cars[p['car_r']] = {'date': p['departure'], 'count': 0}
-            return_cars[p['car_r']]['count'] += 1
-
-    # Also check car_drivers for return direction
-    with get_db() as db:
-        ret_drivers = db.execute(
-            "SELECT * FROM car_drivers WHERE list_id=? AND direction='return'", (lid,)).fetchall()
-    for d in ret_drivers:
-        if d['car_name'] not in return_cars:
-            # Find the return date from a person assigned to this car
-            drv_person = next((p for p in people if p['car_r'] == d['car_name']), None)
-            if drv_person:
-                return_cars[d['car_name']] = {'date': drv_person['departure'], 'count':
-                    sum(1 for p in people if p['car_r'] == d['car_name'])}
-
-    assigned   = 0
-    stuck      = []   # people with no matching return car
-
-    for p in unassigned_r:
-        ret_date = p['departure']
-        placed   = False
-        for cname, info in return_cars.items():
-            if info['date'] == ret_date and info['count'] < cap:
+    assigned = 0; stuck = []
+    for p in unassigned:
+        ret = p['departure']; placed = False
+        # Match to car with same return_date and space
+        for cname, c in pool.items():
+            if c['return_date']==ret and c['return_count'] < cap:
                 _write_car(lid, p['id'], cname, 'חזור', None, now)
-                info['count'] += 1; assigned += 1; placed = True; break
+                c['return_count'] += 1; assigned += 1; placed = True; break
         if not placed:
-            stuck.append({
-                'name':        p['full'],
-                'return_date': ret_date,
-                'car_arrive':  p['car_a'] or '—',
-            })
+            # Use car with no return date yet and space
+            for cname, c in pool.items():
+                if c['return_date']=='' and c['return_count']==0:
+                    _write_car(lid, p['id'], cname, 'חזור', None, now)
+                    c['return_date']=ret; c['return_count']=1; assigned+=1; placed=True; break
+        if not placed:
+            stuck.append({'name':p['full'],'return_date':ret,'car_arrive':p['car_a'] or '—'})
 
     if stuck:
-        dates_needed = list({s['return_date'] for s in stuck})
-        return jsonify({
-            'ok':          False,
-            'assigned':    assigned,
-            'stuck':       stuck,
-            'stuck_count': len(stuck),
-            'dates_needed': dates_needed,
-            'message':     f'{len(stuck)} אנשים ללא רכב חזרה — נדרשת התערבות',
-        })
+        return jsonify({'ok':False,'assigned':assigned,'stuck':stuck,'stuck_count':len(stuck),
+                        'message':f'{len(stuck)} אנשים ללא רכב חזרה — נדרשת התערבות'})
+    return jsonify({'ok':True,'assigned':assigned,'message':'כל החזרות שובצו ✅'})
 
-    return jsonify({'ok': True, 'assigned': assigned, 'message': 'כל החזרות שובצו ✅'})
-
-# ── API: Reset car assignments ─────────────────────────────────────────────────
+# ── API: Reset ─────────────────────────────────────────────────────────────────
 @app.route('/api/lists/<int:lid>/assign-reset', methods=['POST'])
 @admin_required
 def api_assign_reset(lid):
-    """Clear all car assignments for this list."""
     now = datetime.now().isoformat()
     with get_db() as db:
         rows = db.execute("SELECT * FROM list_rows WHERE list_id=?", (lid,)).fetchall()
@@ -874,7 +842,8 @@ def api_assign_reset(lid):
                            (json.dumps(d,ensure_ascii=False), now, row['id']))
         db.execute("DELETE FROM car_drivers WHERE list_id=?", (lid,))
         db.commit()
-    return jsonify({'ok': True})
+    return jsonify({'ok':True})
+
 
 # ── API: Recommend Drivers (legacy — kept for compatibility) ──────────────────
 @app.route('/api/lists/<int:lid>/recommend-drivers', methods=['GET'])
@@ -1051,103 +1020,77 @@ def api_assign_cars_return(lid):
 @app.route('/api/lists/<int:lid>/car-view', methods=['GET'])
 @auth_required
 def api_car_view(lid):
-    lst = get_list(lid)
+    lst          = get_list(lid)
+    car_count    = max(1, lst['car_count'])
     car_capacity = max(1, lst['car_capacity'])
+
     with get_db() as db:
         rows    = db.execute("SELECT * FROM list_rows WHERE list_id=?", (lid,)).fetchall()
         drivers = db.execute("SELECT * FROM car_drivers WHERE list_id=?", (lid,)).fetchall()
-    driver_map = {f"{d['direction']}|{d['car_name']}": d['driver'] for d in drivers}
 
-    arrive_cars, return_cars = {}, {}
+    drv_map = {}
+    for d in drivers:
+        drv_map.setdefault(d['car_name'], {})
+        drv_map[d['car_name']][d['direction']] = d['driver']
+
+    # Initialize ALL pool cars (empty by default)
+    cars_arrive, cars_return = {}, {}
+    for i in range(1, car_count + 1):
+        cname = f'רכב {i}'
+        drv   = drv_map.get(cname,{}).get('arrive','') or drv_map.get(cname,{}).get('return','')
+        cars_arrive[cname] = {'date':'','people':[],'driver':drv,'capacity':car_capacity,'free':car_capacity}
+        cars_return[cname] = {'date':'','people':[],'driver':drv,'capacity':car_capacity,'free':car_capacity}
+
     unassigned_arrive, unassigned_return = [], []
-    seen_a, seen_r = set(), set()
 
     for row in rows:
-        d = json.loads(row['data'])
-        has_car = str(d.get('רכב חברה','')).lower() in ['כן','yes','true','1']
-        full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
-        if not full or has_car: continue  # company car people excluded
-        arr_date = d.get('תאריך הגעה','').strip()
-        ret_date = d.get('תאריך חזרה','').strip()
-        arr_car  = d.get('רכב הלוך','').strip()
-        ret_car  = d.get('רכב חזור','').strip()
-        if arr_date and full not in seen_a:
-            seen_a.add(full)
-            if arr_car:
-                if arr_car not in arrive_cars:
-                    arrive_cars[arr_car] = {'date': arr_date, 'people': [],
-                        'driver': driver_map.get(f'arrive|{arr_car}',''), 'capacity': car_capacity}
-                arrive_cars[arr_car]['people'].append(full)
-            else:
+        d    = json.loads(row['data'])
+        if _get_field(d,'רכב חברה').lower() in ['כן','yes','true','1']: continue
+        full = (_get_field(d,'שם')+' '+_get_field(d,'שם משפחה')).strip()
+        if not full: continue
+        arr_date = _get_field(d,'תאריך הגעה','הגעה')
+        ret_date = _get_field(d,'תאריך חזרה','חזרה')
+        car_a    = _get_field(d,'רכב הלוך')
+        car_r    = _get_field(d,'רכב חזור')
+
+        if arr_date:
+            if car_a and car_a in cars_arrive:
+                c = cars_arrive[car_a]
+                c['people'].append(full)
+                if not c['date']: c['date'] = arr_date
+            elif car_a not in cars_arrive:
                 unassigned_arrive.append(full)
-        if ret_date and full not in seen_r:
-            seen_r.add(full)
-            if ret_car:
-                if ret_car not in return_cars:
-                    return_cars[ret_car] = {'date': ret_date, 'people': [],
-                        'driver': driver_map.get(f'return|{ret_car}',''), 'capacity': car_capacity}
-                return_cars[ret_car]['people'].append(full)
-            else:
+
+        if ret_date:
+            if car_r and car_r in cars_return:
+                c = cars_return[car_r]
+                c['people'].append(full)
+                if not c['date']: c['date'] = ret_date
+            elif car_r not in cars_return:
                 unassigned_return.append(full)
 
-    for car in list(arrive_cars.values()) + list(return_cars.values()):
-        car['people'].sort()
-        car['free'] = max(0, car['capacity'] - len(car['people']))
-
-    # Build person data map for driver date lookups
-    person_dates = {}
-    for row in rows:
-        d = json.loads(row['data'])
-        full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
-        if full:
-            person_dates[full] = {
-                'arrival':   d.get('תאריך הגעה','').strip(),
-                'departure': d.get('תאריך חזרה','').strip(),
-            }
-
-    # Ensure driver appears in BOTH arrive and return for their car
-    all_car_names = set(list(arrive_cars.keys()) + list(return_cars.keys()))
-    for i in range(1, lst['car_count'] + 1):
-        cname = f'רכב {i}'
-        drv_a = driver_map.get(f'arrive|{cname}', '')
-        drv_r = driver_map.get(f'return|{cname}', drv_a)  # fallback to arrive driver
-        if not drv_a: continue
-        pdates = person_dates.get(drv_a, {})
-
-        # Ensure arrive entry exists and driver is in it
-        if cname not in arrive_cars:
-            arrive_cars[cname] = {'date': pdates.get('arrival',''), 'people': [],
-                                   'driver': drv_a, 'capacity': car_capacity}
-        if drv_a not in arrive_cars[cname]['people']:
-            arrive_cars[cname]['people'].insert(0, drv_a)
-            seen_a.add(drv_a)
-
-        # Ensure return entry exists and driver is in it
-        if cname not in return_cars:
-            return_cars[cname] = {'date': pdates.get('departure',''), 'people': [],
-                                   'driver': drv_r, 'capacity': car_capacity}
-        if drv_a not in return_cars[cname]['people']:
-            return_cars[cname]['people'].insert(0, drv_a)
-            seen_r.add(drv_a)
-
-    for car in list(arrive_cars.values()) + list(return_cars.values()):
-        car['free'] = max(0, car['capacity'] - len(car['people']))
-
-    def sort_cars(d):
-        return dict(sorted(d.items(), key=lambda x: int(''.join(filter(str.isdigit, x[0])) or '0')))
+    # Recalculate free seats
+    for c in list(cars_arrive.values()) + list(cars_return.values()):
+        c['people'].sort()
+        c['free'] = max(0, c['capacity'] - len(c['people']))
 
     rec = []
     if unassigned_arrive:
-        extra = math.ceil(len(unassigned_arrive) / car_capacity)
-        rec.append(f'הגעה: {len(unassigned_arrive)} אנשים ללא רכב — הוסף {extra} רכב/ים')
+        rec.append(f'הגעה: {len(unassigned_arrive)} אנשים ללא רכב'
+                   + (f' — הוסף {math.ceil(len(unassigned_arrive)/car_capacity)} רכב/ים' if unassigned_arrive else ''))
     if unassigned_return:
-        extra = math.ceil(len(unassigned_return) / car_capacity)
-        rec.append(f'חזרה: {len(unassigned_return)} אנשים ללא רכב — הוסף {extra} רכב/ים')
+        rec.append(f'חזרה: {len(unassigned_return)} אנשים ללא רכב'
+                   + (f' — הוסף {math.ceil(len(unassigned_return)/car_capacity)} רכב/ים' if unassigned_return else ''))
 
-    return jsonify({'cars_arrive': sort_cars(arrive_cars), 'cars_return': sort_cars(return_cars),
-        'unassigned_arrive': sorted(unassigned_arrive), 'unassigned_return': sorted(unassigned_return),
-        'car_capacity': car_capacity, 'recommendation': rec,
-        'total_arrive': len(seen_a), 'total_return': len(seen_r)})
+    return jsonify({
+        'cars_arrive': cars_arrive, 'cars_return': cars_return,
+        'car_capacity': car_capacity, 'car_count': car_count,
+        'unassigned_arrive': sorted(unassigned_arrive),
+        'unassigned_return': sorted(unassigned_return),
+        'total_arrive': sum(len(v['people']) for v in cars_arrive.values()),
+        'total_return': sum(len(v['people']) for v in cars_return.values()),
+        'recommendation': rec,
+    })
 
 
 @app.route('/api/lists/<int:lid>/car-driver', methods=['POST'])
