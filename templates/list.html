@@ -135,6 +135,24 @@ tr:hover .del-btn{opacity:1}
 .cv-unassigned h4{font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:7px}
 .cv-tags{display:flex;flex-wrap:wrap;gap:5px}
 .cv-ptag{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:2px 9px;font-size:11px;color:#e2e8f0}
+/* Combined car view */
+.cv-cars-combined{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:18px}
+.cv-car-combined{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:14px;transition:border .18s}
+.cv-car-combined.has-driver{border-color:rgba(34,197,94,.28)}
+.cv-car-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}
+.cv-car-name{font-size:13px;font-weight:700;color:#fff}
+.cv-driver-row{display:flex;align-items:center;gap:6px}
+.cv-driver-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22);border-radius:20px;padding:2px 9px;color:#86efac}
+.cv-driver-badge .rm-drv{background:none;border:none;color:rgba(134,239,172,.5);cursor:pointer;font-size:13px;padding:0;line-height:1;font-family:'Heebo',sans-serif;transition:color .13s}
+.cv-driver-badge .rm-drv:hover{color:#fca5a5}
+.cv-add-driver{font-size:10px;background:rgba(255,255,255,.05);border:1px dashed rgba(255,255,255,.2);border-radius:20px;padding:2px 10px;color:rgba(255,255,255,.38);cursor:pointer;font-family:'Heebo',sans-serif;transition:all .14s}
+.cv-add-driver:hover{border-color:rgba(34,197,94,.4);color:#86efac;background:rgba(34,197,94,.05)}
+.cv-driver-inp{background:rgba(255,255,255,.07);border:1px solid rgba(34,197,94,.35);border-radius:20px;padding:2px 10px;color:#fff;font-size:11px;font-family:'Heebo',sans-serif;outline:none;direction:rtl;width:110px}
+.cv-dirs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cv-dir-col{}
+.cv-dir-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.35);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;text-transform:uppercase;letter-spacing:.4px}
+.cv-dir-count{background:rgba(255,255,255,.06);border-radius:10px;padding:1px 6px;font-size:10px}
+@media(max-width:480px){.cv-dirs{grid-template-columns:1fr}.cv-cars-combined{grid-template-columns:1fr}}
 /* changelog */
 .lw{padding:2px 0}.li{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start}
 .li:last-child{border:none}.ld{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:4px}
@@ -206,8 +224,8 @@ tr:hover .del-btn{opacity:1}
 
 <script>
 const LID={{lst.id}}, IS_ADMIN={{('true' if is_admin else 'false')}}, USERNAME={{username|tojson}};
-let lstConfig={teams:{{lst.teams_json|safe}},car_count:{{lst.car_count}},car_capacity:{{lst.car_capacity}},trial_start:{{lst.trial_start|tojson}},trial_end:{{lst.trial_end|tojson}}};
-const ADMIN_ONLY=new Set(), AUTO_COLS=new Set(['רכב הלוך','רכב חזור']);
+let lstConfig={{{'teams':lst.teams,'car_count':lst.car_count,'car_capacity':lst.car_capacity,'trial_start':lst.trial_start or '','trial_end':lst.trial_end or ''}|tojson}};
+const ADMIN_ONLY=new Set(['מספר ת"ז']), AUTO_COLS=new Set(['רכב הלוך','רכב חזור']);
 let rows=[], activeId='table', sortCol=null, sortDir=1, search='', selRows=new Set();
 let currentIssues=[], currentRowIssues={};
 let carViewDir='arrive', carViewData=null;
@@ -252,7 +270,7 @@ function switchTab(id){
 }
 
 // ── TABLE ──────────────────────────────────────────────────────────────────────
-const COLS=[{name:'שם',type:'text'},{name:'שם משפחה',type:'text'},{name:'צוות',type:'select',teams_col:true},{name:'תאריך הגעה',type:'date'},{name:'תאריך חזרה',type:'date'},{name:'אילוצים/הערות',type:'text'},{name:'רכב חברה',type:'status',options:'כן,לא'},{name:'רכב הלוך',type:'text',auto_col:true},{name:'רכב חזור',type:'text',auto_col:true},{name:'מספר חדר',type:'text'}];
+const COLS=[{name:'שם',type:'text'},{name:'שם משפחה',type:'text'},{name:'מספר ת"ז',type:'text',admin_only:true},{name:'צוות',type:'select',teams_col:true},{name:'תאריך הגעה',type:'date'},{name:'תאריך חזרה',type:'date'},{name:'אילוצים/הערות',type:'text'},{name:'רכב חברה',type:'status',options:'כן,לא'},{name:'רכב הלוך',type:'text',auto_col:true},{name:'רכב חזור',type:'text',auto_col:true},{name:'מספר חדר',type:'text'}];
 const visCols=COLS.filter(c=>!ADMIN_ONLY.has(c.name)||IS_ADMIN);
 
 function renderTable(){
@@ -267,7 +285,7 @@ function renderTable(){
   tb.innerHTML=`<input class="srch" placeholder="🔍 חיפוש..." value="${search}" oninput="onSearch(this.value)">
     <button class="btn btn-ghost btn-sm" onclick="doExport()">📥 ייצא</button>
     ${IS_ADMIN?`<label class="btn btn-ghost btn-sm" style="cursor:pointer">📤 ייבא<input type="file" accept=".xlsx,.xls" style="display:none" onchange="quickImport(this)"></label>
-    <button class="btn btn-amber btn-sm" onclick="assignCars()">🚗 שבץ הלוך</button>
+    <button class="btn btn-amber btn-sm" onclick="assignCars()">🚗 שבץ רכבים</button>
     <button class="btn btn-primary btn-sm" onclick="addRow()">+ שורה</button>`:''}`;
   area.appendChild(tb);
 
@@ -402,32 +420,10 @@ function toast(msg){
 
 // Car assign
 async function assignCars(){
-  if(!confirm(`שבץ הלוך: ${lstConfig.car_count} רכבים × ${lstConfig.car_capacity} מקומות\nשים לב: שיבוץ החזור יאופס — יש לבחור נהגים מחדש`))return;
+  if(!confirm(`לשבץ רכבים? ${lstConfig.car_count} רכבים × ${lstConfig.car_capacity} מקומות`))return;
   const r=await fetch('/api/lists/'+LID+'/assign-cars',{method:'POST'});
   const j=await r.json();
-  if(j.ok){await loadRows();renderTable();toast(`✅ שובצו ${j.updated} שיבוצי הלוך — עכשיו בחר נהגים בטאב "רכבים" ואז לחץ "שבץ חזור"`);}
-}
-
-async function assignReturn(){
-  // Check drivers are set
-  const r=await fetch('/api/lists/'+LID+'/car-view');
-  const cv=await r.json();
-  const missingDrivers=Object.entries(cv.cars_arrive||{}).filter(([k,v])=>v.people.length>0&&!v.driver);
-  if(missingDrivers.length>0){
-    if(!confirm(`${missingDrivers.length} רכבים עדיין ללא נהג.\nלהמשיך בכל זאת?`)) return;
-  }
-  const r2=await fetch('/api/lists/'+LID+'/assign-cars-return',{method:'POST'});
-  const j=await r2.json();
-  if(j.ok){
-    await loadRows(); renderTable();
-    if(j.errors&&j.errors.length){
-      let msg=`✅ שובצו ${j.assigned} אנשים לחזור\n⚠️ ${j.errors.length} בעיות:\n`;
-      j.errors.forEach(e=>msg+='• '+e.message+'\n');
-      alert(msg);
-    } else {
-      toast(`✅ שובצו ${j.assigned} אנשים לחזור`);
-    }
-  }
+  if(j.ok){await loadRows();renderTable();toast(`✅ שובצו ${j.updated} שיבוצים`);}
 }
 
 // ── ADMIN PANEL ────────────────────────────────────────────────────────────────
@@ -605,111 +601,106 @@ async function doFix(idx){
 // ── CAR VIEW ───────────────────────────────────────────────────────────────────
 async function showCarView(){
   document.getElementById('mainArea').innerHTML='<div style="text-align:center;padding:30px;color:rgba(255,255,255,.3);font-size:12px">⏳ טוען...</div>';
-  const [r1,r2]=await Promise.all([
-    fetch('/api/lists/'+LID+'/car-view'),
-    fetch('/api/lists/'+LID+'/recommend-drivers')
-  ]);
-  carViewData=await r1.json();
-  carViewData._recs=(await r2.json()).recommendations||{};
-  renderCarView();
+  const r=await fetch('/api/lists/'+LID+'/car-view');
+  carViewData=await r.json(); renderCarView();
 }
 
-function setDir(dir){carViewDir=dir;renderCarView();}
-function renderCarView(){
-  const d=carViewData; const area=document.getElementById('mainArea');
-  const cars=carViewDir==='arrive'?d.cars_arrive:d.cars_return;
-  const unassn=carViewDir==='arrive'?d.unassigned_arrive:d.unassigned_return;
-  const total=carViewDir==='arrive'?d.total_arrive:d.total_return;
-  const isArrive=carViewDir==='arrive';
-
-  let html='<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:280px">';
-
-  // Direction toggle
-  html+='<div class="cv-dir-toggle" style="margin-bottom:12px">';
-  html+='<button class="cv-dir-btn '+(isArrive?'active':'')+'" onclick="setDir(\u0027arrive\u0027)">✈️ הגעה ('+d.total_arrive+')</button>';
-  html+='<button class="cv-dir-btn '+(!isArrive?'active':'')+'" onclick="setDir(\u0027return\u0027)">🏠 חזרה ('+d.total_return+')</button>';
-  html+='</div>';
-
-  // Tips / action buttons
-  if(isArrive&&IS_ADMIN){
-    html+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">';
-    html+='<span style="font-size:11px;color:rgba(251,191,36,.6)">💡 בחר נהג לכל רכב, ואז לחץ שבץ חזור</span>';
-    html+='</div>';
-  }
-  if(!isArrive&&IS_ADMIN){
-    html+='<div style="margin-bottom:10px;display:flex;gap:8px">';
-    html+='<button class="btn btn-amber btn-sm" onclick="assignReturn()">🔄 שבץ חזור</button>';
-    html+='</div>';
-  }
-
-  // Status bar
-  if(d.recommendation&&d.recommendation.length){
-    html+='<div class="cv-rec">⚠️ '+d.recommendation.join(' · ')+'</div>';
-  } else if(total>0&&Object.keys(cars).length>0){
-    html+='<div class="cv-ok" style="margin-bottom:12px">✅ כל '+total+' האנשים שובצו</div>';
-  }
-
-  // Car cards
-  html+='<div class="cv-cars">';
-  Object.entries(cars).forEach(function([cname,car]){
-    html+='<div class="cv-car '+(car.driver?'has-driver':'')+'">';
-    html+='<div class="cv-car-title">🚗 '+cname+' <span style="font-size:10px;color:rgba(255,255,255,.3);margin-right:auto">'+car.people.length+'/'+car.capacity+'</span></div>';
-    html+='<div style="font-size:11px;color:rgba(251,191,36,.7);margin-bottom:5px">📅 '+(car.date||'—')+'</div>';
-    if(isArrive&&carViewData._recs&&carViewData._recs[cname]){
-      const rec=carViewData._recs[cname];
-      const alreadySet=!!car.driver;
-      html+='<div style="font-size:10px;margin-bottom:7px;padding:3px 7px;border-radius:5px;background:rgba(34,197,94,.08);color:'+(alreadySet?'rgba(134,239,172,.5)':'#86efac')+'">';
-      html+='🎯 '+(alreadySet?'נהג: '+car.driver:'מומלץ: '+rec.driver)+' — '+rec.reason;
-      html+='</div>';
-    }
-    html+='<div class="cv-seats">';
-    car.people.forEach(function(person){
-      const isDrv=car.driver===person;
-      html+='<div class="cv-seat '+(isDrv?'driver':'')+'">';
-      html+='<span>'+(isDrv?'🧑‍✈️':'🧑')+'</span>';
-      html+='<span class="sname">'+person+'</span>';
-      if(isDrv) html+='<span class="dbadge">נהג</span>';
-      if(IS_ADMIN){
-        const btnLabel=isDrv?'הסר':'נהג';
-        html+='<button class="md-btn" ';
-        html+='data-car="'+cname+'" data-person="'+person+'" data-isdrv="'+isDrv+'" ';
-        html+='onclick="handleDriverBtn(this)">'+btnLabel+'</button>';
-      }
-      html+='</div>';
-    });
-    for(let i=car.people.length;i<car.capacity;i++){
-      html+='<div class="cv-seat empty"><span>💺</span><span class="sname">פנוי</span></div>';
-    }
-    html+='</div></div>';
+function renderPassengers(people, capacity, driver){
+  let html='<div class="cv-seats">';
+  people.forEach(person=>{
+    const isDrv=driver&&driver===person;
+    html+=`<div class="cv-seat ${isDrv?'driver':''}">
+      <span>${isDrv?'🧑‍✈️':'🧑'}</span><span class="sname">${person}</span>
+      ${isDrv?'<span class="dbadge">נהג</span>':''}
+    </div>`;
   });
-  html+='</div></div>';
+  for(let i=people.length;i<capacity;i++)
+    html+=`<div class="cv-seat empty"><span>💺</span><span class="sname">פנוי</span></div>`;
+  html+='</div>';
+  return html;
+}
 
-  // Unassigned sidebar
-  if(unassn&&unassn.length){
-    html+='<div style="min-width:160px;max-width:200px">';
-    html+='<div class="cv-unassigned">';
-    html+='<h4>⚠️ ללא רכב ('+unassn.length+')</h4>';
-    html+='<div style="font-size:10px;color:rgba(255,200,50,.4);margin-bottom:6px">הוסף רכבים בהגדרות</div>';
-    html+='<div class="cv-tags" style="flex-direction:column">';
-    unassn.forEach(function(p){ html+='<span class="cv-ptag" style="margin-bottom:3px">'+p+'</span>'; });
-    html+='</div></div></div>';
+function renderCarView(){
+  const d=carViewData;
+  const area=document.getElementById('mainArea');
+  let html='';
+
+  if(d.recommendation&&d.recommendation.length)
+    html+=`<div class="cv-rec">⚠️ ${d.recommendation.join(' · ')}<button class="btn btn-ghost btn-sm" style="margin-right:auto" onclick="assignCars()">🔄 שבץ מחדש</button></div>`;
+  else if(d.total_arrive>0||d.total_return>0)
+    html+=`<div class="cv-ok">✅ ${d.total_arrive} בהגעה · ${d.total_return} בחזרה · ${d.car_count} רכבים</div>`;
+
+  // Collect all car names from both directions
+  const allNames=new Set([...Object.keys(d.cars_arrive||{}),...Object.keys(d.cars_return||{})]);
+  const carKeys=[...allNames].sort((a,b)=>{
+    const na=parseInt(a.replace(/\D/g,'')||0),nb=parseInt(b.replace(/\D/g,'')||0);
+    return na-nb;
+  });
+
+  html+=`<div class="cv-cars-combined">`;
+  carKeys.forEach(cname=>{
+    const carA=d.cars_arrive[cname]||{people:[],driver:'',capacity:d.car_capacity,free:d.car_capacity};
+    const carR=d.cars_return[cname]||{people:[],driver:'',capacity:d.car_capacity,free:d.car_capacity};
+    const driver=carA.driver||carR.driver||'';
+    const enc=s=>String(s||'').replace(/'/g,"\\'");
+
+    let driverHtml='';
+    if(driver){
+      driverHtml=`<span class="cv-driver-badge">🧑‍✈️ ${driver}
+        ${IS_ADMIN?`<button class="rm-drv" onclick="setDriver('${enc(cname)}','${enc(driver)}',true)" title="הסר נהג">×</button>`:''}
+      </span>`;
+    } else if(IS_ADMIN){
+      driverHtml=`<button class="cv-add-driver" onclick="promptDriver(this,'${enc(cname)}')">+ נהג</button>`;
+    } else {
+      driverHtml=`<span style="font-size:10px;color:rgba(255,255,255,.2)">אין נהג</span>`;
+    }
+
+    html+=`<div class="cv-car-combined ${driver?'has-driver':''}">
+      <div class="cv-car-header">
+        <span class="cv-car-name">🚗 ${cname}</span>
+        <div class="cv-driver-row">${driverHtml}</div>
+      </div>
+      <div class="cv-dirs">
+        <div class="cv-dir-col">
+          <div class="cv-dir-label">✈️ הגעה <span class="cv-dir-count">${carA.people.length}/${carA.capacity}</span></div>
+          ${renderPassengers(carA.people,carA.capacity,driver)}
+        </div>
+        <div class="cv-dir-col">
+          <div class="cv-dir-label">🏠 חזרה <span class="cv-dir-count">${carR.people.length}/${carR.capacity}</span></div>
+          ${renderPassengers(carR.people,carR.capacity,driver)}
+        </div>
+      </div>
+    </div>`;
+  });
+  html+=`</div>`;
+
+  // Unassigned
+  const unA=d.unassigned_arrive||[], unR=d.unassigned_return||[];
+  if(unA.length||unR.length){
+    html+=`<div class="cv-unassigned">`;
+    if(unA.length) html+=`<h4 style="margin-bottom:5px">⚠️ ${unA.length} ללא שיבוץ הגעה</h4><div class="cv-tags">${unA.map(p=>`<span class="cv-ptag">${p}</span>`).join('')}</div>`;
+    if(unA.length&&unR.length) html+=`<div style="margin:8px 0;border-top:1px solid rgba(255,255,255,.06)"></div>`;
+    if(unR.length) html+=`<h4 style="margin-bottom:5px">⚠️ ${unR.length} ללא שיבוץ חזרה</h4><div class="cv-tags">${unR.map(p=>`<span class="cv-ptag">${p}</span>`).join('')}</div>`;
+    html+=`</div>`;
   }
 
-  html+='</div>';
+  if(IS_ADMIN) html+=`<div style="margin-top:12px"><button class="btn btn-amber" onclick="assignCars()">🔄 שבץ רכבים מחדש</button></div>`;
+
   area.innerHTML=html;
 }
 
-
-function handleDriverBtn(btn){
-  const car=btn.getAttribute('data-car');
-  const person=btn.getAttribute('data-person');
-  const isdrv=btn.getAttribute('data-isdrv')==='true';
-  setDriver(car,person,isdrv);
+function promptDriver(btn, cname){
+  const inp=document.createElement('input');
+  inp.className='cv-driver-inp'; inp.placeholder='שם הנהג...';
+  btn.replaceWith(inp); inp.focus();
+  const commit=()=>{const v=inp.value.trim();if(v)setDriver(cname,v,false);else showCarView();};
+  inp.onkeydown=e=>{if(e.key==='Enter')commit();if(e.key==='Escape')showCarView();};
+  inp.onblur=()=>setTimeout(()=>{if(document.activeElement!==inp)commit();},150);
 }
 
 async function setDriver(car,person,isCurrent){
-  const dir=carViewDir;
-  await fetch('/api/lists/'+LID+'/car-driver',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({direction:dir,car_name:car,driver:isCurrent?'':person})});
+  await fetch('/api/lists/'+LID+'/car-driver',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({car_name:car,driver:isCurrent?'':person})});
   await showCarView();
 }
 

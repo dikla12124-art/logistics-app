@@ -970,12 +970,13 @@ def api_car_view(lid):
 def api_set_car_driver(lid):
     d = request.json
     with get_db() as db:
-        if d.get('driver'):
-            db.execute("INSERT OR REPLACE INTO car_drivers (list_id,direction,car_name,driver) VALUES (?,?,?,?)",
-                       (lid, d['direction'], d['car_name'], d['driver']))
-        else:
-            db.execute("DELETE FROM car_drivers WHERE list_id=? AND direction=? AND car_name=?",
-                       (lid, d['direction'], d['car_name']))
+        for direction in ['arrive', 'return']:
+            if d.get('driver'):
+                db.execute("INSERT OR REPLACE INTO car_drivers (list_id,direction,car_name,driver) VALUES (?,?,?,?)",
+                           (lid, direction, d['car_name'], d['driver']))
+            else:
+                db.execute("DELETE FROM car_drivers WHERE list_id=? AND direction=? AND car_name=?",
+                           (lid, direction, d['car_name']))
         db.commit()
     return jsonify({'ok':True})
 
