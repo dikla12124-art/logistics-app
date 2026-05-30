@@ -155,6 +155,12 @@ tr:hover .del-btn{opacity:1}
 .cv-date-badge{font-size:9px;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:1px 7px;color:#93c5fd;font-weight:700;letter-spacing:.2px}
 @media(max-width:480px){.cv-dirs{grid-template-columns:1fr}.cv-cars-combined{grid-template-columns:1fr}}
 /* changelog */
+.assign-steps{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px;padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:12px}
+.btn-step{display:flex;align-items:center;gap:8px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.25);border-radius:10px;padding:7px 13px;color:#93c5fd;cursor:pointer;font-family:'Heebo',sans-serif;font-size:12px;transition:all .15s;text-align:right}
+.btn-step:hover{background:rgba(59,130,246,.22);border-color:rgba(59,130,246,.45)}
+.btn-step .step-num{background:rgba(59,130,246,.3);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0}
+.btn-step small{display:block;font-size:9px;color:rgba(255,255,255,.4);margin-top:1px}
+.step-arrow{color:rgba(255,255,255,.2);font-size:16px}
 .lw{padding:2px 0}.li{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start}
 .li:last-child{border:none}.ld{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:4px}
 .d-e{background:#3b82f6}.d-c{background:#22c55e}.d-d{background:#ef4444}.d-a{background:#a855f7}.d-car{background:#fbbf24}
@@ -286,7 +292,7 @@ function renderTable(){
   tb.innerHTML=`<input class="srch" placeholder="🔍 חיפוש..." value="${search}" oninput="onSearch(this.value)">
     <button class="btn btn-ghost btn-sm" onclick="doExport()">📥 ייצא</button>
     ${IS_ADMIN?`<label class="btn btn-ghost btn-sm" style="cursor:pointer">📤 ייבא<input type="file" accept=".xlsx,.xls" style="display:none" onchange="quickImport(this)"></label>
-    <button class="btn btn-amber btn-sm" onclick="assignCars()">🚗 שבץ רכבים</button>
+    <button class="btn btn-amber btn-sm" onclick="setActiveTab('carview');showCarView()">🚗 שיבוץ רכבים</button>
     <button class="btn btn-primary btn-sm" onclick="addRow()">+ שורה</button>`:''}`;
   area.appendChild(tb);
 
@@ -419,19 +425,59 @@ function toast(msg){
   t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),4000);
 }
 
-// Car assign
-async function assignCars(){
-  if(!confirm('לשבץ רכבים לפי נהגים ותאריכים?'))return;
-  toast('⏳ משבץ...');
-  const r=await fetch('/api/lists/'+LID+'/assign-cars',{method:'POST'});
+// ── 3-STEP ASSIGNMENT ──────────────────────────────────────────────────────────
+async function assignStep1(){
+  if(!confirm('שלב 1: לשבץ כל מי שנוסע וחוזר באותם תאריכים לאותו רכב?'))return;
+  toast('⏳ מחשב שיבוץ אחיד...');
+  const r=await fetch('/api/lists/'+LID+'/assign-step1',{method:'POST'});
   const j=await r.json();
   if(j.ok){
-    await loadRows();
-    if(activeId==='carview') await showCarView(); else renderTable();
-    const ua=j.unassigned_arrive||0, ur=j.unassigned_return||0;
-    const warn=ua||ur ? ` · ⚠️ ${ua} להגעה/${ur} לחזרה ללא שיבוץ`:'';
-    toast(`✅ ${j.drivers} נהגים · ${j.assigned_arrive} להגעה · ${j.assigned_return} לחזרה${warn}`);
+    await loadRows(); await showCarView();
+    toast(`✅ שלב 1 הושלם — ${j.cars_created} רכבים, ${j.assigned} אנשים`);
+  } else toast('❌ '+(j.message||'שגיאה'));
+}
+
+async function assignStep2(){
+  if(!confirm('שלב 2: לשבץ את כל מי שלא שובץ עדיין לפי תאריך הגעה?'))return;
+  toast('⏳ מחשב שיבוץ הלוך...');
+  const r=await fetch('/api/lists/'+LID+'/assign-step2',{method:'POST'});
+  const j=await r.json();
+  if(j.ok){
+    await loadRows(); await showCarView();
+    toast(`✅ שלב 2 הושלם — ${j.cars_created||0} רכבים חדשים, ${j.assigned} אנשים`);
+  } else toast('❌ '+(j.message||'שגיאה'));
+}
+
+async function assignStep3(){
+  if(!confirm('שלב 3: לשבץ חזרות לפי הרכבים הקיימים?'))return;
+  toast('⏳ מחשב שיבוץ חזור...');
+  const r=await fetch('/api/lists/'+LID+'/assign-step3',{method:'POST'});
+  const j=await r.json();
+  await loadRows(); await showCarView();
+  if(j.ok){
+    toast('✅ '+j.message);
+  } else {
+    // Show stuck people
+    let msg=`⚠️ ${j.stuck_count} אנשים ללא רכב חזרה:\n`;
+    const byDate={};
+    j.stuck.forEach(s=>{
+      if(!byDate[s.return_date])byDate[s.return_date]=[];
+      byDate[s.return_date].push(s.name);
+    });
+    Object.entries(byDate).forEach(([date,names])=>{
+      msg+=`\n📅 ${date}: ${names.join(', ')}`;
+    });
+    msg+='\n\nנדרשת התערבות: הוסף רכב או שנה תאריכים.';
+    alert(msg);
+    toast(`⚠️ ${j.stuck_count} ללא רכב חזרה — ראה/י פרטים`);
   }
+}
+
+async function assignReset(){
+  if(!confirm('לאפס את כל שיבוצי הרכבים?'))return;
+  const r=await fetch('/api/lists/'+LID+'/assign-reset',{method:'POST'});
+  const j=await r.json();
+  if(j.ok){await loadRows();await showCarView();toast('✅ שיבוצים אופסו');}
 }
 
 // ── ADMIN PANEL ────────────────────────────────────────────────────────────────
@@ -694,7 +740,24 @@ function renderCarView(){
     html+=`</div>`;
   }
 
-  if(IS_ADMIN) html+=`<div style="margin-top:12px"><button class="btn btn-amber" onclick="assignCars()">🔄 שבץ רכבים מחדש</button></div>`;
+  if(IS_ADMIN) html+=`
+    <div class="assign-steps">
+      <button class="btn btn-step" onclick="assignStep1()">
+        <span class="step-num">1</span>
+        <span>שיבוץ אחיד<small>הלוך+חזור ביחד</small></span>
+      </button>
+      <span class="step-arrow">←</span>
+      <button class="btn btn-step" onclick="assignStep2()">
+        <span class="step-num">2</span>
+        <span>שיבוץ הלוך<small>לפי תאריך הגעה</small></span>
+      </button>
+      <span class="step-arrow">←</span>
+      <button class="btn btn-step" onclick="assignStep3()">
+        <span class="step-num">3</span>
+        <span>שיבוץ חזור<small>לפי תאריך חזרה</small></span>
+      </button>
+      <button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="assignReset()">🗑 אפס הכל</button>
+    </div>`;
 
   area.innerHTML=html;
 }
