@@ -268,7 +268,6 @@ function renderTable(){
     <button class="btn btn-ghost btn-sm" onclick="doExport()">📥 ייצא</button>
     ${IS_ADMIN?`<label class="btn btn-ghost btn-sm" style="cursor:pointer">📤 ייבא<input type="file" accept=".xlsx,.xls" style="display:none" onchange="quickImport(this)"></label>
     <button class="btn btn-amber btn-sm" onclick="assignCars()">🚗 שבץ הלוך</button>
-    <button class="btn btn-ghost btn-sm" onclick="assignReturn()">🔄 שבץ חזור</button>
     <button class="btn btn-primary btn-sm" onclick="addRow()">+ שורה</button>`:''}`;
   area.appendChild(tb);
 
@@ -634,8 +633,8 @@ function renderCarView(){
     html+='</div>';
   }
   if(!isArrive&&IS_ADMIN){
-    html+='<div style="margin-bottom:10px">';
-    html+='<button class="btn btn-ghost btn-sm" onclick="assignReturn()">🔄 שבץ חזור מחדש</button>';
+    html+='<div style="margin-bottom:10px;display:flex;gap:8px">';
+    html+='<button class="btn btn-amber btn-sm" onclick="assignReturn()">🔄 שבץ חזור</button>';
     html+='</div>';
   }
 
