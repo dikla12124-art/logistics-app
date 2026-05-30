@@ -660,8 +660,10 @@ function renderCarView(){
       html+='<span class="sname">'+person+'</span>';
       if(isDrv) html+='<span class="dbadge">נהג</span>';
       if(IS_ADMIN){
-        const safeName=person.replace(/'/g,"\'");
-        html+='<button class="md-btn" onclick="setDriver(''+cname+'',''+safeName+'','+isDrv+')">'+(isDrv?'הסר':'נהג')+'</button>';
+        const btnLabel=isDrv?'הסר':'נהג';
+        html+='<button class="md-btn" ';
+        html+='data-car="'+cname+'" data-person="'+person+'" data-isdrv="'+isDrv+'" ';
+        html+='onclick="handleDriverBtn(this)">'+btnLabel+'</button>';
       }
       html+='</div>';
     });
@@ -687,6 +689,13 @@ function renderCarView(){
   area.innerHTML=html;
 }
 
+
+function handleDriverBtn(btn){
+  const car=btn.getAttribute('data-car');
+  const person=btn.getAttribute('data-person');
+  const isdrv=btn.getAttribute('data-isdrv')==='true';
+  setDriver(car,person,isdrv);
+}
 
 async function setDriver(car,person,isCurrent){
   const dir=carViewDir;
