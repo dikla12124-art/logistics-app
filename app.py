@@ -612,125 +612,274 @@ def api_fix_issue(lid):
 
     return jsonify({'ok':False,'error':'סוג תיקון לא מוכר'})
 
-# ── API: Car Assignment ARRIVE ────────────────────────────────────────────────
+# ── API: Car Assignment ────────────────────────────────────────────────────────
 @app.route('/api/lists/<int:lid>/assign-cars', methods=['POST'])
 @admin_required
 def api_assign_cars(lid):
     """
-    Assign people to cars by ARRIVAL date.
-    Rules:
-      - Each car has EXACTLY ONE arrival date
-      - Respect car_capacity (max people per car)
-      - Cars are allocated from the pool (car_count) sequentially
-      - People who dont fit go to unassigned list
+    Assign non-company-car people to numbered cars.
+    - People with רכב חברה=כן are excluded entirely
+    - Drivers are taken from car_drivers table (set manually via UI)
+    - Passengers matched to cars by driver's arrival/return dates
+    - Priority: passengers who match BOTH directions with the same driver
     """
     lst = get_list(lid)
     car_count    = max(1, lst['car_count'])
     car_capacity = max(1, lst['car_capacity'])
-
     with get_db() as db:
-        rows = db.execute("SELECT * FROM list_rows WHERE list_id=?", (lid,)).fetchall()
-    if not rows:
-        return jsonify({'ok': False, 'message': 'אין שורות'})
+        rows    = db.execute("SELECT * FROM list_rows WHERE list_id=?", (lid,)).fetchall()
+        drivers = db.execute("SELECT * FROM car_drivers WHERE list_id=?", (lid,)).fetchall()
+    if not rows: return jsonify({'ok': False, 'message': 'אין שורות'})
 
-    from collections import defaultdict
-    date_groups = defaultdict(list)   # arrival_date -> [full_name, ...]
-    seen = set()
+    # Build driver map: car_name -> driver_name (arrive direction is canonical)
+    driver_map = {}
+    for d in drivers:
+        if d['direction'] == 'arrive':
+            driver_map[d['car_name']] = d['driver']
+
+    # Build person data: full_name -> {arrival, departure, id}
+    person_info = {}
     for row in rows:
         d = json.loads(row['data'])
-        has_car = str(d.get('רכב חברה', '')).lower() in ['כן','yes','true','1']
-        if has_car: continue
+        has_car = str(d.get('רכב חברה','')).lower() in ['כן','yes','true','1']
+        if has_car: continue  # completely excluded
         full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
-        arr  = d.get('תאריך הגעה','').strip()
-        if full and arr and full not in seen:
-            seen.add(full)
-            date_groups[arr].append(full)
+        if full:
+            person_info[full] = {
+                'id':       row['id'],
+                'arrival':  d.get('תאריך הגעה','').strip(),
+                'departure':d.get('תאריך חזרה','').strip(),
+            }
 
-    # Allocate cars from pool — each car gets ONE date
-    # car_pool[car_num] = arrival_date  (1-indexed)
-    car_pool      = {}   # car_num (int) -> arrival_date
-    person_car    = {}   # full_name -> f'רכב {num}'
-    unassigned    = []   # people who could not be assigned (pool exhausted)
-    next_car_num  = 1    # next available car from pool
-
-    for arr_date in sorted(date_groups.keys()):
-        people = sorted(date_groups[arr_date])
-        for i, name in enumerate(people):
-            # Which slot within this date?
-            slot_in_date = i // car_capacity  # 0 = first car, 1 = second car, etc.
-            # Find the car number assigned to (arr_date, slot_in_date)
-            # We need a mapping: (arr_date, slot) -> car_num
-            key = (arr_date, slot_in_date)
-            # Check if we already allocated a car for this (date, slot)
-            car_num = None
-            for cn, cd in car_pool.items():
-                if cd == key:
-                    car_num = cn
-                    break
-            if car_num is None:
-                # Allocate next car from pool
-                if next_car_num <= car_count:
-                    car_num = next_car_num
-                    car_pool[car_num] = key
-                    next_car_num += 1
-                else:
-                    unassigned.append(name)
-                    continue
-            person_car[name] = f'רכב {car_num}'
-
-    # Write assignments to DB
-    updated = 0
-    with get_db() as db:
-        for row in rows:
-            d = json.loads(row['data'])
-            has_car = str(d.get('רכב חברה', '')).lower() in ['כן','yes','true','1']
-            full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
-            changed = False
-            if has_car:
-                own = full or 'בעל רכב'
-                if d.get('רכב הלוך') != own: d['רכב הלוך'] = own; changed = True
-                if d.get('רכב חזור') != own: d['רכב חזור'] = own; changed = True
-            elif full in person_car:
-                nv = person_car[full]
-                if d.get('רכב הלוך') != nv: d['רכב הלוך'] = nv; changed = True
-                # Clear return — phase 2
-                if d.get('רכב חזור',''):
-                    d['רכב חזור'] = ''; changed = True
-            elif full in unassigned:
-                # Clear previous assignment
-                if d.get('רכב הלוך',''):
-                    d['רכב הלוך'] = ''; changed = True
-                if d.get('רכב חזור',''):
-                    d['רכב חזור'] = ''; changed = True
-            if changed:
-                db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
-                           (json.dumps(d, ensure_ascii=False), datetime.now().isoformat(), row['id']))
-                updated += 1
-        # Clear return drivers — need re-selection
-        db.execute("DELETE FROM car_drivers WHERE list_id=? AND direction='return'", (lid,))
-        db.commit()
-
-    # Build summary: car_num -> {date, count}
-    car_summary = {}
-    for car_num, key in car_pool.items():
-        arr_date, slot = key
-        car_summary[f'רכב {car_num}'] = {
-            'date': arr_date,
-            'count': sum(1 for v in person_car.values() if v == f'רכב {car_num}')
+    # Build car slots using driver dates
+    car_slots = {}
+    for i in range(1, car_count + 1):
+        car_name = f'רכב {i}'
+        drv_name = driver_map.get(car_name, '')
+        drv_info = person_info.get(drv_name, {}) if drv_name else {}
+        car_slots[car_name] = {
+            'arrive':      [],
+            'ret':         [],
+            'arrive_date': drv_info.get('arrival',  ''),
+            'return_date': drv_info.get('departure', ''),
+            'driver':      drv_name,
         }
 
-    return jsonify({
-        'ok': True, 'updated': updated,
-        'car_summary': car_summary,
-        'unassigned': unassigned,
-        'total_assigned': len(person_car),
-        'pool_used': next_car_num - 1,
-        'message': f'שובצו {len(person_car)} אנשים ב-{next_car_num-1} רכבים' +
-                   (f' · {len(unassigned)} ללא מקום (הוסף רכבים)' if unassigned else '')
-    })
+    # Passengers = everyone without company car, excluding the drivers themselves
+    driver_names = set(driver_map.values())
+    passengers = [
+        {'full': full, **info}
+        for full, info in person_info.items()
+        if full not in driver_names
+    ]
 
+    assigned_a, assigned_r = set(), set()
 
-# ── API: Recommend Drivers ────────────────────────────────────────────────────
+    # Pass 1 — match BOTH arrival AND return with same driver
+    for p in passengers:
+        for slot in car_slots.values():
+            if not slot['arrive_date'] and not slot['return_date']: continue
+            if (p['arrival']   == slot['arrive_date'] and
+                p['departure'] == slot['return_date']  and
+                car_capacity-1-len(slot['arrive']) > 0 and
+                car_capacity-1-len(slot['ret'])    > 0 and
+                p['full'] not in assigned_a and
+                p['full'] not in assigned_r):
+                slot['arrive'].append(p)
+                slot['ret'].append(p)
+                assigned_a.add(p['full'])
+                assigned_r.add(p['full'])
+                break
+
+    # Pass 2 — arrival date match only
+    for p in passengers:
+        if p['full'] in assigned_a: continue
+        for slot in car_slots.values():
+            if (slot['arrive_date'] and
+                p['arrival'] == slot['arrive_date'] and
+                car_capacity-1-len(slot['arrive']) > 0):
+                slot['arrive'].append(p)
+                assigned_a.add(p['full'])
+                break
+
+    # Pass 3 — return date match only
+    for p in passengers:
+        if p['full'] in assigned_r: continue
+        for slot in car_slots.values():
+            if (slot['return_date'] and
+                p['departure'] == slot['return_date'] and
+                car_capacity-1-len(slot['ret']) > 0):
+                slot['ret'].append(p)
+                assigned_r.add(p['full'])
+                break
+
+    now = datetime.now().isoformat()
+    updated = 0
+    with get_db() as db:
+        # Clear existing assignments (only non-company-car people)
+        for row in rows:
+            d = json.loads(row['data'])
+            has_car = str(d.get('רכב חברה','')).lower() in ['כן','yes','true','1']
+            if has_car: continue
+            if d.get('רכב הלוך') or d.get('רכב חזור'):
+                d['רכב הלוך'] = ''; d['רכב חזור'] = ''
+                db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                           (json.dumps(d,ensure_ascii=False), now, row['id']))
+
+        # Write new assignments
+        for car_name, slot in car_slots.items():
+            # Driver gets the car in both directions
+            if slot['driver'] and slot['driver'] in person_info:
+                r = db.execute("SELECT data FROM list_rows WHERE id=?",
+                               (person_info[slot['driver']]['id'],)).fetchone()
+                d = json.loads(r['data'])
+                d['רכב הלוך'] = car_name; d['רכב חזור'] = car_name
+                db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                           (json.dumps(d,ensure_ascii=False), now,
+                            person_info[slot['driver']]['id']))
+                updated += 1
+
+            for p in slot['arrive']:
+                r = db.execute("SELECT data FROM list_rows WHERE id=?", (p['id'],)).fetchone()
+                d = json.loads(r['data']); d['רכב הלוך'] = car_name
+                db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                           (json.dumps(d,ensure_ascii=False), now, p['id']))
+                updated += 1
+
+            for p in slot['ret']:
+                r = db.execute("SELECT data FROM list_rows WHERE id=?", (p['id'],)).fetchone()
+                d = json.loads(r['data']); d['רכב חזור'] = car_name
+                db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                           (json.dumps(d,ensure_ascii=False), now, p['id']))
+                updated += 1
+        db.commit()
+
+    ua = len([p for p in passengers if p['full'] not in assigned_a and p['arrival']])
+    ur = len([p for p in passengers if p['full'] not in assigned_r and p['departure']])
+    return jsonify({'ok':True,'updated':updated,
+                    'assigned_arrive':len(assigned_a),'assigned_return':len(assigned_r),
+                    'unassigned_arrive':ua,'unassigned_return':ur})
+    lst = get_list(lid)
+    car_count    = max(1, lst['car_count'])
+    car_capacity = max(1, lst['car_capacity'])
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM list_rows WHERE list_id=?", (lid,)).fetchall()
+    if not rows: return jsonify({'ok': False, 'message': 'אין שורות'})
+
+    all_people = []
+    for row in rows:
+        d = json.loads(row['data'])
+        has_car = str(d.get('רכב חברה','')).lower() in ['כן','yes','true','1']
+        full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
+        if full:
+            all_people.append({
+                'full':full, 'id':row['id'],
+                'has_car':has_car,
+                'arrival': d.get('תאריך הגעה','').strip(),
+                'departure':d.get('תאריך חזרה','').strip(),
+            })
+
+    drivers     = [p for p in all_people if p['has_car']]
+    non_drivers = [p for p in all_people if not p['has_car']]
+
+    # Each driver gets a numbered car (both directions)
+    car_slots = {}
+    for i, drv in enumerate(drivers[:car_count]):
+        car_slots[i+1] = {
+            'driver':      drv,
+            'arrive':      [],
+            'ret':         [],
+            'arrive_date': drv['arrival'],
+            'return_date': drv['departure'],
+        }
+
+    assigned_a, assigned_r = set(), set()
+
+    # Pass 1 — passengers matching BOTH arrival AND return date of same driver
+    for person in non_drivers:
+        for slot in car_slots.values():
+            if (person['arrival']   == slot['arrive_date'] and
+                person['departure'] == slot['return_date']  and
+                car_capacity-1-len(slot['arrive']) > 0      and
+                car_capacity-1-len(slot['ret'])    > 0      and
+                person['full'] not in assigned_a            and
+                person['full'] not in assigned_r):
+                slot['arrive'].append(person)
+                slot['ret'].append(person)
+                assigned_a.add(person['full'])
+                assigned_r.add(person['full'])
+                break
+
+    # Pass 2 — arrival date match only
+    for person in non_drivers:
+        if person['full'] in assigned_a: continue
+        for slot in car_slots.values():
+            if (person['arrival'] == slot['arrive_date'] and
+                car_capacity-1-len(slot['arrive']) > 0):
+                slot['arrive'].append(person)
+                assigned_a.add(person['full'])
+                break
+
+    # Pass 3 — return date match only
+    for person in non_drivers:
+        if person['full'] in assigned_r: continue
+        for slot in car_slots.values():
+            if (person['departure'] == slot['return_date'] and
+                car_capacity-1-len(slot['ret']) > 0):
+                slot['ret'].append(person)
+                assigned_r.add(person['full'])
+                break
+
+    now = datetime.now().isoformat()
+    updated = 0
+    with get_db() as db:
+        # Clear all existing assignments
+        for row in rows:
+            d = json.loads(row['data'])
+            if d.get('רכב הלוך') or d.get('רכב חזור'):
+                d['רכב הלוך'] = ''; d['רכב חזור'] = ''
+                db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                           (json.dumps(d,ensure_ascii=False), now, row['id']))
+
+        for car_num, slot in car_slots.items():
+            car_name = f'רכב {car_num}'
+            # Driver → numbered car (both directions)
+            r = db.execute("SELECT data FROM list_rows WHERE id=?", (slot['driver']['id'],)).fetchone()
+            d = json.loads(r['data'])
+            d['רכב הלוך'] = car_name; d['רכב חזור'] = car_name
+            db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                       (json.dumps(d,ensure_ascii=False), now, slot['driver']['id']))
+            updated += 1
+
+            for person in slot['arrive']:
+                r = db.execute("SELECT data FROM list_rows WHERE id=?", (person['id'],)).fetchone()
+                d = json.loads(r['data']); d['רכב הלוך'] = car_name
+                db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                           (json.dumps(d,ensure_ascii=False), now, person['id']))
+                updated += 1
+
+            for person in slot['ret']:
+                r = db.execute("SELECT data FROM list_rows WHERE id=?", (person['id'],)).fetchone()
+                d = json.loads(r['data']); d['רכב חזור'] = car_name
+                db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                           (json.dumps(d,ensure_ascii=False), now, person['id']))
+                updated += 1
+
+        # Save driver assignments (both directions)
+        db.execute("DELETE FROM car_drivers WHERE list_id=?", (lid,))
+        for car_num, slot in car_slots.items():
+            car_name = f'רכב {car_num}'; drv_name = slot['driver']['full']
+            for direction in ['arrive','return']:
+                db.execute("INSERT INTO car_drivers (list_id,direction,car_name,driver) VALUES (?,?,?,?)",
+                           (lid, direction, car_name, drv_name))
+        db.commit()
+
+    ua = len([p for p in non_drivers if p['full'] not in assigned_a and p['arrival']])
+    ur = len([p for p in non_drivers if p['full'] not in assigned_r and p['departure']])
+    return jsonify({'ok':True,'updated':updated,'drivers':len(car_slots),
+                    'assigned_arrive':len(assigned_a),'assigned_return':len(assigned_r),
+                    'unassigned_arrive':ua,'unassigned_return':ur})
+# ── API: Recommend Drivers (legacy — kept for compatibility) ──────────────────
 @app.route('/api/lists/<int:lid>/recommend-drivers', methods=['GET'])
 @auth_required
 def api_recommend_drivers(lid):
@@ -920,7 +1069,7 @@ def api_car_view(lid):
         d = json.loads(row['data'])
         has_car = str(d.get('רכב חברה','')).lower() in ['כן','yes','true','1']
         full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
-        if not full or has_car: continue
+        if not full or has_car: continue  # company car people excluded
         arr_date = d.get('תאריך הגעה','').strip()
         ret_date = d.get('תאריך חזרה','').strip()
         arr_car  = d.get('רכב הלוך','').strip()
@@ -946,6 +1095,45 @@ def api_car_view(lid):
 
     for car in list(arrive_cars.values()) + list(return_cars.values()):
         car['people'].sort()
+        car['free'] = max(0, car['capacity'] - len(car['people']))
+
+    # Build person data map for driver date lookups
+    person_dates = {}
+    for row in rows:
+        d = json.loads(row['data'])
+        full = (d.get('שם','') + ' ' + d.get('שם משפחה','')).strip()
+        if full:
+            person_dates[full] = {
+                'arrival':   d.get('תאריך הגעה','').strip(),
+                'departure': d.get('תאריך חזרה','').strip(),
+            }
+
+    # Ensure driver appears in BOTH arrive and return for their car
+    all_car_names = set(list(arrive_cars.keys()) + list(return_cars.keys()))
+    for i in range(1, lst['car_count'] + 1):
+        cname = f'רכב {i}'
+        drv_a = driver_map.get(f'arrive|{cname}', '')
+        drv_r = driver_map.get(f'return|{cname}', drv_a)  # fallback to arrive driver
+        if not drv_a: continue
+        pdates = person_dates.get(drv_a, {})
+
+        # Ensure arrive entry exists and driver is in it
+        if cname not in arrive_cars:
+            arrive_cars[cname] = {'date': pdates.get('arrival',''), 'people': [],
+                                   'driver': drv_a, 'capacity': car_capacity}
+        if drv_a not in arrive_cars[cname]['people']:
+            arrive_cars[cname]['people'].insert(0, drv_a)
+            seen_a.add(drv_a)
+
+        # Ensure return entry exists and driver is in it
+        if cname not in return_cars:
+            return_cars[cname] = {'date': pdates.get('departure',''), 'people': [],
+                                   'driver': drv_r, 'capacity': car_capacity}
+        if drv_a not in return_cars[cname]['people']:
+            return_cars[cname]['people'].insert(0, drv_a)
+            seen_r.add(drv_a)
+
+    for car in list(arrive_cars.values()) + list(return_cars.values()):
         car['free'] = max(0, car['capacity'] - len(car['people']))
 
     def sort_cars(d):
