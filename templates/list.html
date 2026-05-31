@@ -563,6 +563,8 @@ async function runValidation(){
 }
 
 // ── ERRORS TAB ─────────────────────────────────────────────────────────────────
+function fmtErrDate(iso){if(!iso)return '';const p=iso.split('-');return p.length===3?`${parseInt(p[2])}/${parseInt(p[1])}`:iso;}
+
 async function showErrors(){
   document.getElementById('mainArea').innerHTML='<div style="text-align:center;padding:30px;color:rgba(255,255,255,.3);font-size:12px">⏳ בודק...</div>';
   const j=await runValidation();
@@ -602,8 +604,10 @@ async function showErrors(){
     // Fix panel
     if(iss.fix_type==='add_person'){
       const cands=(iss.fix_data.candidates||[]).map(c=>`<button class="cand-btn" onclick="selectCand(${idx},'${c.replace(/'/g,"\\'")}')">${c}</button>`).join('');
+      const fd=iss.fix_data;
+      const periodTxt=(fd.date_end&&fd.date_end!==fd.date)?`לתקופה ${fmtErrDate(fd.date)}–${fmtErrDate(fd.date_end)}`:`לתאריך ${fmtErrDate(fd.date)}`;
       html+=`<div class="fix-panel" id="fp_${idx}">
-        <label>הזן שם מלא של אדם מצוות "${iss.fix_data.team}" לתאריך ${iss.fix_data.date}:</label>
+        <label>הזן שם מלא של אדם מצוות "${fd.team}" ${periodTxt}:</label>
         <input id="fixInput_${idx}" placeholder="שם פרטי שם משפחה" onkeydown="if(event.key==='Enter')doFix(${idx})">
         ${cands?`<div style="font-size:11px;color:rgba(255,255,255,.3);margin-top:7px;margin-bottom:4px">אנשים מצוות זה ברשימה:</div><div class="candidates">${cands}</div>`:''}
         <div style="margin-top:8px;display:flex;gap:7px">

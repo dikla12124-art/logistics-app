@@ -600,6 +600,7 @@ def api_fix_issue(lid):
     if fix_type == 'add_person':
         team      = fix_data.get('team','')
         arr_date  = fix_data.get('date','')
+        end_date  = fix_data.get('date_end','') or arr_date
         full_name = fix_data.get('full_name','').strip()
         if not full_name:
             return jsonify({'ok':False, 'needs_input':True, 'prompt': f'שם מלא של האדם מצוות {team} להוסיף לתאריך {arr_date}:'})
@@ -609,13 +610,14 @@ def api_fix_issue(lid):
         data['שם משפחה']   = parts[1] if len(parts) > 1 else ''
         data['צוות']        = team
         data['תאריך הגעה']  = arr_date
-        data['תאריך חזרה']  = arr_date
+        data['תאריך חזרה']  = end_date   # cover the whole missing range
         with get_db() as db:
             cur = db.execute("INSERT INTO list_rows (list_id,data) VALUES (?,?)",
                              (lid, json.dumps(data, ensure_ascii=False)))
             log_change(db, cur.lastrowid, lid, f'תיקון אוטומטי: הוסף {full_name} לצוות {team}', by=session.get('username'))
             db.commit()
-        return jsonify({'ok':True, 'message':f'{full_name} נוסף/ה לצוות {team} בתאריך {arr_date}', 'row_id': cur.lastrowid})
+        period = arr_date if end_date == arr_date else f'{arr_date} עד {end_date}'
+        return jsonify({'ok':True, 'message':f'{full_name} נוסף/ה לצוות {team} לתקופה {period}', 'row_id': cur.lastrowid})
 
     if fix_type == 'extend_or_add':
         action    = fix_data.get('action')    # 'extend' or 'add'
