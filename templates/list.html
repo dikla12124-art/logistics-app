@@ -292,7 +292,6 @@ function renderTable(){
   tb.innerHTML=`<input class="srch" placeholder="🔍 חיפוש..." value="${search}" oninput="onSearch(this.value)">
     <button class="btn btn-ghost btn-sm" onclick="doExport()">📥 ייצא</button>
     ${IS_ADMIN?`<label class="btn btn-ghost btn-sm" style="cursor:pointer">📤 ייבא<input type="file" accept=".xlsx,.xls" style="display:none" onchange="quickImport(this)"></label>
-    <button class="btn btn-amber btn-sm" onclick="setActiveTab('carview');showCarView()">🚗 רכבים</button>
     <button class="btn btn-primary btn-sm" onclick="addRow()">+ שורה</button>`:''}`;
   area.appendChild(tb);
 
@@ -426,74 +425,77 @@ function toast(msg){
 }
 
 // ── 3-STEP ASSIGNMENT ──────────────────────────────────────────────────────────
+async function _step(url,label){
+  toast('⏳ '+label+'...');
+  try{
+    const r=await fetch(url,{method:'POST'});
+    if(!r.ok){const t=await r.text();throw new Error('שגיאת שרת '+r.status+': '+t.slice(0,200));}
+    return await r.json();
+  }catch(e){toast('❌ '+e.message);console.error(e);return null;}
+}
+
 async function assignStep1(){
   if(!confirm('שלב 1: לאפס הכל ולשבץ מי שנוסע וחוזר באותם תאריכים?'))return;
-  toast('⏳ מאפס ומשבץ...');
-  const r=await fetch('/api/lists/'+LID+'/assign-step1',{method:'POST'});
-  const j=await r.json();
+  const j=await _step('/api/lists/'+LID+'/assign-step1','מאפס ומשבץ');
+  if(!j) return;
   await loadRows(); await showCarView();
-  if(j.ok){
-    let msg=`✅ שיבוץ אחיד: ${j.assigned} אנשים ב-${j.cars_used} רכבים\n`;
-    if(j.groups&&j.groups.length){
-      j.groups.forEach(g=>{msg+=`\n📅 ${g.arr}→${g.ret}: ${g.names.join(', ')}`;});
-    } else {
-      msg+='\n⚠️ לא נמצאו קבוצות! לחץ 🔍 לבדיקת תאריכים';
-    }
-    if(j.ungrouped&&j.ungrouped.length)
-      msg+=`\n\nללא שני תאריכים (שלב 2/3): ${j.ungrouped.join(', ')}`;
-    toast(j.assigned>0?'✅ שיבוץ אחיד הושלם':'⚠️ לא שובץ כלום — בדוק תאריכים');
-    alert(msg);
+  if(j.error){alert('שגיאה: '+j.error); return;}
+  let msg=`✅ שיבוץ אחיד: ${j.assigned} אנשים ב-${j.cars_used} רכבים (סה"כ ${j.total_people})`;
+  if(j.groups&&j.groups.length){
+    msg+='\n\nקבוצות:';
+    j.groups.forEach(g=>{msg+=`\n📅 ${g.arr}→${g.ret} (${g.count}): ${g.names.join(', ')}`;});
+  } else {
+    msg+='\n\n⚠️ לא נמצאו קבוצות — לחצי 🔍 לבדיקת תאריכים';
   }
+  if(j.ungrouped&&j.ungrouped.length)
+    msg+=`\n\nחסר תאריך (שלבים 2/3): ${j.ungrouped.join(', ')}`;
+  toast(j.assigned>0?'✅ שיבוץ אחיד הושלם':'⚠️ לא שובץ כלום');
+  alert(msg);
 }
 
 async function assignStep2(){
-  toast('⏳ משבץ הלוך...');
-  const r=await fetch('/api/lists/'+LID+'/assign-step2',{method:'POST'});
-  const j=await r.json();
+  const j=await _step('/api/lists/'+LID+'/assign-step2','משבץ הלוך');
+  if(!j) return;
   await loadRows(); await showCarView();
-  if(j.ok){
-    toast(`✅ שלב 2: ${j.assigned} אנשים שובצו להגעה`);
-    if(j.still_unassigned&&j.still_unassigned.length)
-      alert(`⚠️ ללא רכב הגעה (אין מקום): ${j.still_unassigned.join(', ')}`);
-  }
+  if(j.error){alert('שגיאה: '+j.error); return;}
+  toast(`✅ שלב 2: ${j.assigned} שובצו להגעה`);
+  if(j.still_unassigned&&j.still_unassigned.length)
+    alert(`⚠️ ללא רכב הגעה: ${j.still_unassigned.join(', ')}`);
 }
 
 async function assignStep3(){
-  toast('⏳ משבץ חזור...');
-  const r=await fetch('/api/lists/'+LID+'/assign-step3',{method:'POST'});
-  const j=await r.json();
+  const j=await _step('/api/lists/'+LID+'/assign-step3','משבץ חזור');
+  if(!j) return;
   await loadRows(); await showCarView();
+  if(j.error){alert('שגיאה: '+j.error); return;}
   if(j.ok){ toast('✅ '+j.message); }
   else{
-    let msg=`⚠️ ${j.stuck_count} אנשים ללא רכב חזרה:\n`;
-    const byDate={};
-    j.stuck.forEach(s=>{if(!byDate[s.return_date])byDate[s.return_date]=[];byDate[s.return_date].push(s.name);});
-    Object.entries(byDate).forEach(([d,ns])=>{msg+=`\n📅 ${d}: ${ns.join(', ')}`;});
-    msg+='\n\nנדרשת התערבות: הוסף/י רכב או שני/י תאריכים.';
-    toast(`⚠️ ${j.stuck_count} ללא רכב חזרה`); alert(msg);
+    let msg=`⚠️ ${j.stuck_count} ללא רכב חזרה:\n`;
+    const bd={};
+    j.stuck.forEach(s=>{if(!bd[s.return_date])bd[s.return_date]=[];bd[s.return_date].push(s.name);});
+    Object.entries(bd).forEach(([d,ns])=>{msg+=`\n📅 ${d}: ${ns.join(', ')}`;});
+    msg+='\n\nהוסיפי רכב או שיני תאריכים.';
+    toast(`⚠️ ${j.stuck_count} ללא חזרה`); alert(msg);
   }
 }
 
 async function assignReset(){
   if(!confirm('לאפס את כל שיבוצי הרכבים?'))return;
-  const r=await fetch('/api/lists/'+LID+'/assign-reset',{method:'POST'});
-  const j=await r.json();
-  if(j.ok){await loadRows();await showCarView();toast('✅ שיבוצים אופסו');}
+  const j=await _step('/api/lists/'+LID+'/assign-reset','מאפס');
+  if(!j) return;
+  await loadRows(); await showCarView(); toast('✅ שיבוצים אופסו');
 }
 
 async function checkDates(){
   toast('⏳ בודק תאריכים...');
-  const r=await fetch('/api/lists/'+LID+'/debug-dates');
-  const j=await r.json();
-  let msg=`📅 תאריכים (${j.count} אנשים):\n`;
-  const groups={};
-  j.people.forEach(p=>{
-    const key=`${p.norm_arrival||'?'}→${p.norm_departure||'?'}`;
-    if(!groups[key])groups[key]=[];
-    groups[key].push(p.name);
-  });
-  Object.entries(groups).forEach(([k,ns])=>{msg+=`\n${k}: ${ns.join(', ')}`;});
-  alert(msg);
+  try{
+    const r=await fetch('/api/lists/'+LID+'/debug-dates');
+    const j=await r.json();
+    if(!j.ok){alert('שגיאה: '+j.error); return;}
+    let msg=`📅 ${j.count} אנשים:\n`;
+    j.groups.forEach(g=>{msg+=`\n${g.key}: ${g.people.join(', ')}`;});
+    alert(msg);
+  }catch(e){toast('❌ '+e.message);}
 }
 
 // ── ADMIN PANEL ────────────────────────────────────────────────────────────────
