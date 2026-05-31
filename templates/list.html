@@ -427,58 +427,50 @@ function toast(msg){
 
 // ── 3-STEP ASSIGNMENT ──────────────────────────────────────────────────────────
 async function assignStep1(){
-  if(!confirm('שלב 1: לשבץ כל מי שנוסע וחוזר באותם תאריכים לאותו רכב?'))return;
-  toast('⏳ מחשב שיבוץ אחיד...');
+  if(!confirm('שלב 1: לאפס הכל ולשבץ מי שנוסע וחוזר באותם תאריכים?'))return;
+  toast('⏳ מאפס ומשבץ...');
   const r=await fetch('/api/lists/'+LID+'/assign-step1',{method:'POST'});
-  const j=await r.json();
-  if(j.ok){
-    await loadRows(); await showCarView();
-    let msg=`✅ שיבוץ אחיד: ${j.assigned} אנשים`;
-    if(j.groups&&j.groups.length){
-      msg+='\nקבוצות שנמצאו:';
-      j.groups.forEach(g=>msg+=`\n📅 הגעה ${g.arr} / חזרה ${g.ret}: ${g.count} אנשים`);
-    }
-    if(j.ungrouped&&j.ungrouped.length)
-      msg+=`\n⚠️ ללא שיבוץ (תאריך חסר או שונה): ${j.ungrouped.join(', ')}`;
-    toast(msg.split('\n')[0]);
-    if(j.groups) console.log('שיבוץ אחיד:', j);
-    alert(msg);
-  } else toast('❌ '+(j.message||'שגיאה'));
-}
-
-async function assignStep2(){
-  if(!confirm('שלב 2: לשבץ את כל מי שלא שובץ עדיין לפי תאריך הגעה?'))return;
-  toast('⏳ מחשב שיבוץ הלוך...');
-  const r=await fetch('/api/lists/'+LID+'/assign-step2',{method:'POST'});
-  const j=await r.json();
-  if(j.ok){
-    await loadRows(); await showCarView();
-    toast(`✅ שלב 2 הושלם — ${j.cars_created||0} רכבים חדשים, ${j.assigned} אנשים`);
-  } else toast('❌ '+(j.message||'שגיאה'));
-}
-
-async function assignStep3(){
-  if(!confirm('שלב 3: לשבץ חזרות לפי הרכבים הקיימים?'))return;
-  toast('⏳ מחשב שיבוץ חזור...');
-  const r=await fetch('/api/lists/'+LID+'/assign-step3',{method:'POST'});
   const j=await r.json();
   await loadRows(); await showCarView();
   if(j.ok){
-    toast('✅ '+j.message);
-  } else {
-    // Show stuck people
+    let msg=`✅ שיבוץ אחיד: ${j.assigned} אנשים ב-${j.cars_used} רכבים\n`;
+    if(j.groups&&j.groups.length){
+      j.groups.forEach(g=>{msg+=`\n📅 ${g.arr}→${g.ret}: ${g.names.join(', ')}`;});
+    } else {
+      msg+='\n⚠️ לא נמצאו קבוצות! לחץ 🔍 לבדיקת תאריכים';
+    }
+    if(j.ungrouped&&j.ungrouped.length)
+      msg+=`\n\nללא שני תאריכים (שלב 2/3): ${j.ungrouped.join(', ')}`;
+    toast(j.assigned>0?'✅ שיבוץ אחיד הושלם':'⚠️ לא שובץ כלום — בדוק תאריכים');
+    alert(msg);
+  }
+}
+
+async function assignStep2(){
+  toast('⏳ משבץ הלוך...');
+  const r=await fetch('/api/lists/'+LID+'/assign-step2',{method:'POST'});
+  const j=await r.json();
+  await loadRows(); await showCarView();
+  if(j.ok){
+    toast(`✅ שלב 2: ${j.assigned} אנשים שובצו להגעה`);
+    if(j.still_unassigned&&j.still_unassigned.length)
+      alert(`⚠️ ללא רכב הגעה (אין מקום): ${j.still_unassigned.join(', ')}`);
+  }
+}
+
+async function assignStep3(){
+  toast('⏳ משבץ חזור...');
+  const r=await fetch('/api/lists/'+LID+'/assign-step3',{method:'POST'});
+  const j=await r.json();
+  await loadRows(); await showCarView();
+  if(j.ok){ toast('✅ '+j.message); }
+  else{
     let msg=`⚠️ ${j.stuck_count} אנשים ללא רכב חזרה:\n`;
     const byDate={};
-    j.stuck.forEach(s=>{
-      if(!byDate[s.return_date])byDate[s.return_date]=[];
-      byDate[s.return_date].push(s.name);
-    });
-    Object.entries(byDate).forEach(([date,names])=>{
-      msg+=`\n📅 ${date}: ${names.join(', ')}`;
-    });
-    msg+='\n\nנדרשת התערבות: הוסף רכב או שנה תאריכים.';
-    alert(msg);
-    toast(`⚠️ ${j.stuck_count} ללא רכב חזרה — ראה/י פרטים`);
+    j.stuck.forEach(s=>{if(!byDate[s.return_date])byDate[s.return_date]=[];byDate[s.return_date].push(s.name);});
+    Object.entries(byDate).forEach(([d,ns])=>{msg+=`\n📅 ${d}: ${ns.join(', ')}`;});
+    msg+='\n\nנדרשת התערבות: הוסף/י רכב או שני/י תאריכים.';
+    toast(`⚠️ ${j.stuck_count} ללא רכב חזרה`); alert(msg);
   }
 }
 
@@ -487,6 +479,21 @@ async function assignReset(){
   const r=await fetch('/api/lists/'+LID+'/assign-reset',{method:'POST'});
   const j=await r.json();
   if(j.ok){await loadRows();await showCarView();toast('✅ שיבוצים אופסו');}
+}
+
+async function checkDates(){
+  toast('⏳ בודק תאריכים...');
+  const r=await fetch('/api/lists/'+LID+'/debug-dates');
+  const j=await r.json();
+  let msg=`📅 תאריכים (${j.count} אנשים):\n`;
+  const groups={};
+  j.people.forEach(p=>{
+    const key=`${p.norm_arrival||'?'}→${p.norm_departure||'?'}`;
+    if(!groups[key])groups[key]=[];
+    groups[key].push(p.name);
+  });
+  Object.entries(groups).forEach(([k,ns])=>{msg+=`\n${k}: ${ns.join(', ')}`;});
+  alert(msg);
 }
 
 // ── ADMIN PANEL ────────────────────────────────────────────────────────────────
@@ -708,6 +715,7 @@ function renderCarView(){
         <span>שיבוץ חזור<small>לפי תאריך חזרה</small></span>
       </button>
       <button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="assignReset()">🗑 אפס הכל</button>
+      <button class="btn btn-ghost btn-sm" onclick="checkDates()">🔍 בדוק תאריכים</button>
     </div>`;
 
   if(d.recommendation&&d.recommendation.length)
