@@ -1080,25 +1080,45 @@ def api_car_view(lid):
         car_a    = _get_field(d,'רכב הלוך')
         car_r    = _get_field(d,'רכב חזור')
 
-        if arr_date:
-            if car_a and car_a in cars_arrive:
-                c = cars_arrive[car_a]
+        # Show in arrive if has car assignment (don't gate on date)
+        if car_a and car_a in cars_arrive:
+            c = cars_arrive[car_a]
+            if full not in c['people']:
                 c['people'].append(full)
-                if not c['date']: c['date'] = arr_date
-            elif car_a not in cars_arrive:
-                unassigned_arrive.append(full)
+            if arr_date and not c['date']: c['date'] = arr_date
+        elif not car_a and arr_date:
+            unassigned_arrive.append(full)
 
-        if ret_date:
-            if car_r and car_r in cars_return:
-                c = cars_return[car_r]
+        # Show in return if has car assignment (don't gate on date)
+        if car_r and car_r in cars_return:
+            c = cars_return[car_r]
+            if full not in c['people']:
                 c['people'].append(full)
-                if not c['date']: c['date'] = ret_date
-            elif car_r not in cars_return:
-                unassigned_return.append(full)
+            if ret_date and not c['date']: c['date'] = ret_date
+        elif not car_r and ret_date:
+            unassigned_return.append(full)
+
+    # Ensure driver appears in BOTH directions for their car
+    for i in range(1, car_count + 1):
+        cname = f'רכב {i}'
+        drv_a = drv_map.get(cname,{}).get('arrive','')
+        drv_r = drv_map.get(cname,{}).get('return','') or drv_a
+        drv   = drv_a or drv_r
+        if drv:
+            # Driver must appear in arrive
+            if drv not in cars_arrive[cname]['people']:
+                cars_arrive[cname]['people'].insert(0, drv)
+            # Driver must appear in return
+            if drv not in cars_return[cname]['people']:
+                cars_return[cname]['people'].insert(0, drv)
+            # Copy date from one direction to the other if missing
+            if cars_arrive[cname]['date'] and not cars_return[cname]['date']:
+                pass  # keep separate dates
+            cars_arrive[cname]['driver']  = drv
+            cars_return[cname]['driver']  = drv
 
     # Recalculate free seats
     for c in list(cars_arrive.values()) + list(cars_return.values()):
-        c['people'].sort()
         c['free'] = max(0, c['capacity'] - len(c['people']))
 
     rec = []
