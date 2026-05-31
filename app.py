@@ -614,6 +614,25 @@ def api_fix_issue(lid):
     return jsonify({'ok':False,'error':'סוג תיקון לא מוכר'})
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+def _norm_date(v):
+    """Normalize any date format to DD/MM/YYYY for comparison."""
+    import re
+    v = str(v).strip()
+    if not v or v.lower() in ['none','null','']: return ''
+    # Already DD/MM or DD/MM/YYYY
+    m = re.match(r'^(\d{1,2})[/\.](\d{1,2})(?:[/\.](\d{2,4}))?$', v)
+    if m:
+        d,mo,yr = m.group(1),m.group(2),m.group(3) or ''
+        return f"{d.zfill(2)}/{mo.zfill(2)}" + (f"/{yr}" if yr else '')
+    # YYYY-MM-DD  or  YYYY/MM/DD
+    m = re.match(r'^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$', v)
+    if m:
+        return f"{m.group(3).zfill(2)}/{m.group(2).zfill(2)}/{m.group(1)}"
+    # DD-MM-YYYY
+    m = re.match(r'^(\d{1,2})-(\d{1,2})-(\d{2,4})$', v)
+    if m:
+        return f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
+    return v  # return as-is if unrecognized
 def _get_field(d, *keys):
     for k in keys:
         v = str(d.get(k,'')).strip()
@@ -630,14 +649,12 @@ def _car_people(lid):
         if _get_field(d,'רכב חברה').lower() in ['כן','yes','true','1']: continue
         full = (_get_field(d,'שם') + ' ' + _get_field(d,'שם משפחה')).strip()
         if not full: continue
-        people.append({
-            'full':      full,
-            'id':        row['id'],
-            'arrival':   _get_field(d,'תאריך הגעה','הגעה'),
-            'departure': _get_field(d,'תאריך חזרה','חזרה'),
-            'car_a':     _get_field(d,'רכב הלוך'),
-            'car_r':     _get_field(d,'רכב חזור'),
-        })
+        people.append({'full': full, 'id': row['id'],
+                       'arrival':   _norm_date(_get_field(d,'תאריך הגעה','הגעה')),
+                       'departure': _norm_date(_get_field(d,'תאריך חזרה','חזרה')),
+                       'car_a':     _get_field(d,'רכב הלוך'),
+                       'car_r':     _get_field(d,'רכב חזור'),
+                       })
     return people
 
 def _next_car_num(lid):
@@ -720,11 +737,15 @@ def api_assign_step1(lid):
         return jsonify({'ok':True,'assigned':0,'message':'לא נמצאו אנשים עם שני תאריכים ללא שיבוץ'})
 
     assigned = 0
+    groups_info = []
+    ungrouped = []
     # cars available for round-trip: empty cars first
     avail = [cn for cn,c in pool.items() if c['arrive_count']==0 and c['return_count']==0]
 
     car_idx = 0
     for (arr,ret), grp in sorted(combo.items(), key=lambda x: -len(x[1])):
+        groups_info.append({'arr':arr,'ret':ret,'count':len(grp),
+                            'names':[p['full'] for p in grp]})
         pool_of_grp = list(grp)
         while pool_of_grp:
             if car_idx >= len(avail): break
@@ -738,8 +759,14 @@ def api_assign_step1(lid):
                     _write_car(lid, p['id'], cname, 'both', None, now)
                     pool_of_grp.remove(p); assigned += 1; pax += 1
                 else: break
+        ungrouped.extend([p['full'] for p in pool_of_grp])
 
-    return jsonify({'ok':True,'assigned':assigned})
+    # People with no dates at all
+    for p in people:
+        if not p['arrival'] and not p['departure'] and not p['car_a'] and not p['car_r']:
+            ungrouped.append(f"{p['full']} (אין תאריכים)")
+
+    return jsonify({'ok':True,'assigned':assigned,'groups':groups_info,'ungrouped':ungrouped})
 
 # ── API: Step 2 — שיבוץ הלוך ──────────────────────────────────────────────────
 @app.route('/api/lists/<int:lid>/assign-step2', methods=['POST'])
@@ -1048,8 +1075,8 @@ def api_car_view(lid):
         if _get_field(d,'רכב חברה').lower() in ['כן','yes','true','1']: continue
         full = (_get_field(d,'שם')+' '+_get_field(d,'שם משפחה')).strip()
         if not full: continue
-        arr_date = _get_field(d,'תאריך הגעה','הגעה')
-        ret_date = _get_field(d,'תאריך חזרה','חזרה')
+        arr_date = _norm_date(_get_field(d,'תאריך הגעה','הגעה'))
+        ret_date = _norm_date(_get_field(d,'תאריך חזרה','חזרה'))
         car_a    = _get_field(d,'רכב הלוך')
         car_r    = _get_field(d,'רכב חזור')
 

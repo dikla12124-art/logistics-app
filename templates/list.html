@@ -433,7 +433,16 @@ async function assignStep1(){
   const j=await r.json();
   if(j.ok){
     await loadRows(); await showCarView();
-    toast(`✅ שלב 1 הושלם — ${j.cars_created} רכבים, ${j.assigned} אנשים`);
+    let msg=`✅ שיבוץ אחיד: ${j.assigned} אנשים`;
+    if(j.groups&&j.groups.length){
+      msg+='\nקבוצות שנמצאו:';
+      j.groups.forEach(g=>msg+=`\n📅 הגעה ${g.arr} / חזרה ${g.ret}: ${g.count} אנשים`);
+    }
+    if(j.ungrouped&&j.ungrouped.length)
+      msg+=`\n⚠️ ללא שיבוץ (תאריך חסר או שונה): ${j.ungrouped.join(', ')}`;
+    toast(msg.split('\n')[0]);
+    if(j.groups) console.log('שיבוץ אחיד:', j);
+    alert(msg);
   } else toast('❌ '+(j.message||'שגיאה'));
 }
 
