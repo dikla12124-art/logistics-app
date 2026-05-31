@@ -436,34 +436,62 @@ def api_validate(lid):
             while d <= t_end:
                 all_dates.append(d); d += timedelta(days=1)
 
+            # ── Team coverage: collect missing days per team, then merge into ranges ──
+            def fmt(dt):
+                return f'{dt.day}/{dt.month}'
+
+            if teams:
+                team_missing = {t: [] for t in teams}  # team -> [date objects missing]
+                for day in all_dates:
+                    present_teams = set()
+                    for p in people:
+                        try:
+                            arr = date.fromisoformat(p['arrival'])  if p['arrival']  else None
+                            dep = date.fromisoformat(p['departure']) if p['departure'] else None
+                            if arr and dep and arr <= day <= dep and p['team']:
+                                present_teams.add(p['team'])
+                        except: pass
+                    for team in teams:
+                        if team not in present_teams:
+                            team_missing[team].append(day)
+
+                # Merge consecutive missing days into ranges
+                for team, missing in team_missing.items():
+                    if not missing: continue
+                    missing.sort()
+                    ranges = []
+                    rs = re_ = missing[0]
+                    for dd in missing[1:]:
+                        if (dd - re_).days == 1:
+                            re_ = dd
+                        else:
+                            ranges.append((rs, re_)); rs = re_ = dd
+                    ranges.append((rs, re_))
+
+                    candidates = list(set(p['name'] for p in people
+                                          if p['team']==team and p['name']))[:8]
+                    for (rstart, rend) in ranges:
+                        if rstart == rend:
+                            period = f'בתאריך {fmt(rstart)}'
+                            key = f'cov_{rstart.isoformat()}_{team}'
+                        else:
+                            period = f'מ-{fmt(rstart)} עד {fmt(rend)}'
+                            key = f'cov_{rstart.isoformat()}_{rend.isoformat()}_{team}'
+                        add_issue(key,
+                            type='no_coverage', severity='error',
+                            date=rstart.isoformat(),
+                            date_end=rend.isoformat(),
+                            team=team,
+                            message=f'אין נציג מצוות "{team}" {period}',
+                            approvable=True,
+                            fix_type='add_person',
+                            fix_data={'team': team, 'date': rstart.isoformat(),
+                                      'date_end': rend.isoformat(),
+                                      'candidates': candidates})
+
+            # ── Car capacity per day (unchanged) ──
             for day in all_dates:
                 ds = day.isoformat()
-                present = []
-                for p in people:
-                    try:
-                        arr = date.fromisoformat(p['arrival'])  if p['arrival']  else None
-                        dep = date.fromisoformat(p['departure']) if p['departure'] else None
-                        if arr and dep and arr <= day <= dep:
-                            present.append(p)
-                    except: pass
-
-                # Team coverage
-                if teams:
-                    for team in teams:
-                        if not any(p['team'] == team for p in present):
-                            # Find candidates: same team, present on adjacent days
-                            candidates = [p['name'] for p in people
-                                          if p['team'] == team and p['name']]
-                            add_issue(f'cov_{ds}_{team}',
-                                type='no_coverage', severity='error',
-                                date=ds, team=team,
-                                message=f'אין נציג מצוות "{team}" בתאריך {ds}',
-                                approvable=True,
-                                fix_type='add_person',
-                                fix_data={'team': team, 'date': ds,
-                                          'candidates': list(set(candidates))[:8]})
-
-                # Car capacity per day
                 arriving   = [p for p in people if p['arrival']   == ds and not p['has_car']]
                 departing  = [p for p in people if p['departure']  == ds and not p['has_car']]
 
