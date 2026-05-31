@@ -732,9 +732,9 @@ def api_assign_step1(lid):
                     d2 = json.loads(r['data']); d2['רכב הלוך']=cname; d2['רכב חזור']=cname
                     conn.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
                                  (json.dumps(d2,ensure_ascii=False), now, drv['id']))
-                    conn.execute("INSERT OR REPLACE INTO car_drivers VALUES (?,'arrive',?,?)",
+                    conn.execute("INSERT OR REPLACE INTO car_drivers (list_id,direction,car_name,driver) VALUES (?,'arrive',?,?)",
                                  (lid, cname, drv['full']))
-                    conn.execute("INSERT OR REPLACE INTO car_drivers VALUES (?,'return',?,?)",
+                    conn.execute("INSERT OR REPLACE INTO car_drivers (list_id,direction,car_name,driver) VALUES (?,'return',?,?)",
                                  (lid, cname, drv['full']))
                     assigned += 1
                     pax = 0
@@ -809,7 +809,7 @@ def api_assign_step2(lid):
                         d2 = json.loads(r['data']); d2['רכב הלוך']=cname
                         conn.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
                                      (json.dumps(d2,ensure_ascii=False), now, drv['id']))
-                        conn.execute("INSERT OR REPLACE INTO car_drivers VALUES (?,'arrive',?,?)",
+                        conn.execute("INSERT OR REPLACE INTO car_drivers (list_id,direction,car_name,driver) VALUES (?,'arrive',?,?)",
                                      (lid, cname, drv['full']))
                         c['arrive_count']=1; c['arrive_date']=arr; assigned+=1
                         while pool and c['arrive_count'] < cap:
@@ -1320,6 +1320,20 @@ def api_changelog(lid):
     with get_db() as db:
         logs=db.execute("SELECT * FROM changes_log WHERE list_id=? ORDER BY created_at DESC LIMIT 200",(lid,)).fetchall()
     return jsonify([dict(l) for l in logs])
+
+@app.route('/api/lists/<int:lid>/changelog-clear', methods=['POST'])
+@admin_required
+def api_changelog_clear(lid):
+    try:
+        conn = get_db()
+        try:
+            conn.execute("DELETE FROM changes_log WHERE list_id=?", (lid,))
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({'ok':True})
+    except Exception as e:
+        return jsonify({'ok':False,'error':str(e)}), 500
 
 # ── API: Users (admin only) ────────────────────────────────────────────────────
 @app.route('/api/users', methods=['GET'])

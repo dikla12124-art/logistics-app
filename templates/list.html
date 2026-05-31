@@ -291,8 +291,7 @@ function renderTable(){
   const tb=document.createElement('div'); tb.className='tbar';
   tb.innerHTML=`<input class="srch" placeholder="🔍 חיפוש..." value="${search}" oninput="onSearch(this.value)">
     <button class="btn btn-ghost btn-sm" onclick="doExport()">📥 ייצא</button>
-    ${IS_ADMIN?`<label class="btn btn-ghost btn-sm" style="cursor:pointer">📤 ייבא<input type="file" accept=".xlsx,.xls" style="display:none" onchange="quickImport(this)"></label>
-    <button class="btn btn-primary btn-sm" onclick="addRow()">+ שורה</button>`:''}`;
+    ${IS_ADMIN?`<label class="btn btn-ghost btn-sm" style="cursor:pointer">📤 ייבא<input type="file" accept=".xlsx,.xls" style="display:none" onchange="quickImport(this)"></label>`:''}`;
   area.appendChild(tb);
 
   // Selection bar
@@ -820,8 +819,9 @@ async function setDriver(car,person,isCurrent){
 async function showLog(){
   document.getElementById('mainArea').innerHTML='<div style="text-align:center;padding:30px;color:rgba(255,255,255,.3);font-size:12px">⏳ טוען...</div>';
   const r=await fetch('/api/lists/'+LID+'/changelog'); const logs=await r.json();
-  if(!logs.length){document.getElementById('mainArea').innerHTML='<div style="text-align:center;padding:36px;color:rgba(255,255,255,.22);font-size:12px">אין שינויים</div>';return;}
-  let html='<div class="lw">';
+  const clearBtn=IS_ADMIN?`<div style="margin-bottom:12px;text-align:left"><button class="btn btn-danger btn-sm" onclick="clearLog()">🗑 נקה לוג</button></div>`:'';
+  if(!logs.length){document.getElementById('mainArea').innerHTML=clearBtn+'<div style="text-align:center;padding:36px;color:rgba(255,255,255,.22);font-size:12px">אין שינויים</div>';return;}
+  let html=clearBtn+'<div class="lw">';
   logs.forEach(l=>{
     let dc='d-e';
     if(l.action==='אושר'||l.action==='בוטל אישור')dc='d-c';
@@ -835,6 +835,14 @@ async function showLog(){
     html+=`<div class="li"><div class="ld ${dc}"></div><div class="lb">${at}</div><div class="lt">${(l.created_at||'').replace('T',' ').slice(0,16)}</div></div>`;
   });
   document.getElementById('mainArea').innerHTML=html+'</div>';
+}
+
+async function clearLog(){
+  if(!confirm('לנקות את כל הלוג? פעולה זו אינה הפיכה.'))return;
+  const r=await fetch('/api/lists/'+LID+'/changelog-clear',{method:'POST'});
+  const j=await r.json();
+  if(j.ok){showLog();toast('✅ הלוג נוקה');}
+  else toast('❌ '+(j.error||'שגיאה'));
 }
 
 // ── IMPORT MODAL ───────────────────────────────────────────────────────────────
