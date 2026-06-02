@@ -275,6 +275,11 @@ async function init(){
   if(IS_ADMIN) startChangeWatch();
 }
 
+async function loadRows(){
+  const r=await fetch('/api/lists/'+LID+'/rows');
+  rows=await r.json();
+}
+
 // ── Admin change notifier ──────────────────────────────────────────────────────
 let _lastSeenChange=null, _watchStarted=false;
 async function startChangeWatch(){
