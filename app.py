@@ -97,6 +97,13 @@ def init_db():
                 approved   INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                token      TEXT PRIMARY KEY,
+                username   TEXT,
+                role       TEXT,
+                user_id    INTEGER,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
         ''')
         import os as _os
         defaults = [
@@ -116,8 +123,50 @@ def get_setting(k):
         r = db.execute("SELECT value FROM app_settings WHERE key=?", (k,)).fetchone()
     return r['value'] if r else None
 
+import secrets as _secrets
+from flask import g as _g
+
+def _make_token(username, role, user_id=None):
+    tok = _secrets.token_urlsafe(24)
+    with get_db() as db:
+        db.execute("INSERT INTO auth_tokens (token,username,role,user_id) VALUES (?,?,?,?)",
+                   (tok, username, role, user_id))
+        db.commit()
+    return tok
+
+def _token_from_request():
+    # Per-tab token: header (AJAX) or query param (page load)
+    tok = request.headers.get('X-Auth-Token','')
+    if not tok:
+        tok = request.args.get('t','')
+    return tok.strip()
+
+def current_user():
+    """Resolve the user for THIS request from token first, then cookie session."""
+    if hasattr(_g, '_cur_user'):
+        return _g._cur_user
+    user = None
+    tok = _token_from_request()
+    if tok:
+        with get_db() as db:
+            r = db.execute("SELECT * FROM auth_tokens WHERE token=?", (tok,)).fetchone()
+        if r:
+            user = {'username': r['username'], 'role': r['role'],
+                    'user_id': r['user_id'], 'token': tok}
+    if not user and session.get('auth'):
+        user = {'username': session.get('username',''),
+                'role': session.get('role','user'),
+                'user_id': session.get('user_id'), 'token': None}
+    _g._cur_user = user
+    return user
+
 def is_admin():
-    return session.get('role') == 'admin'
+    u = current_user()
+    return bool(u and u.get('role') == 'admin')
+
+def cur_username():
+    u = current_user()
+    return u.get('username','?') if u else '?'
 
 def normalize_header(h):
     if h is None: return ''
@@ -139,7 +188,7 @@ def cell_to_str(val):
 def log_change(db, row_id, list_id, action, field=None, old=None, new=None, by=None):
     db.execute(
         "INSERT INTO changes_log (row_id,list_id,action,field_name,old_value,new_value,done_by) VALUES (?,?,?,?,?,?,?)",
-        (row_id, list_id, action, field, old, new, by or session.get('username','?'))
+        (row_id, list_id, action, field, old, new, by or cur_username())
     )
 
 def mask_admin(data):
@@ -165,23 +214,67 @@ def get_rows(lid, admin=False):
 @app.route('/login', methods=['GET','POST'])
 def login():
     error = None
+    info  = None
+    mode  = request.args.get('mode','login')
     if request.method == 'POST':
-        pw = request.form.get('password','').strip()
-        name = request.form.get('name','').strip()
+        action = request.form.get('action','login')
+        name   = request.form.get('name','').strip()
+        pw     = request.form.get('password','').strip()
+
+        if action == 'register':
+            # Self-registration: create a pending user account
+            username = request.form.get('username','').strip() or name
+            if not name or not pw:
+                error = 'שם וסיסמה הם שדות חובה'
+            elif len(pw) < 4:
+                error = 'הסיסמה חייבת להכיל לפחות 4 תווים'
+            else:
+                try:
+                    with get_db() as db:
+                        db.execute("INSERT INTO users (name,username,password,role,approved) VALUES (?,?,?,?,0)",
+                                   (name, username, pw, 'user'))
+                        db.commit()
+                    info = 'נרשמת בהצלחה! המתן לאישור מנהל לפני הכניסה הראשונה.'
+                    mode = 'login'
+                except Exception:
+                    error = 'שם המשתמש כבר תפוס — בחר שם אחר'
+                    mode = 'register'
+            return render_template('login.html', error=error, info=info, mode=mode)
+
+        # ── Login ──
         adm = get_setting('admin_password') or 'admin2026'
-        reg = get_setting('password') or 'logistics2026'
+
+        # Admin master password (name optional)
         if pw == adm:
+            tok = _make_token(name or 'אדמין', 'admin', None)
             session.update({'auth':True,'role':'admin','username':name or 'אדמין'})
-            return redirect(url_for('index'))
-        elif pw == reg:
-            session.update({'auth':True,'role':'user','username':name or 'משתמש'})
-            return redirect(url_for('index'))
+            return redirect(url_for('index', t=tok))
+
+        # Per-user login: match username + password in users table
+        with get_db() as db:
+            u = db.execute("SELECT * FROM users WHERE username=? OR name=?",
+                           (name, name)).fetchone()
+        if u and u['password'] == pw:
+            if not u['approved']:
+                error = 'החשבון ממתין לאישור מנהל'
+            else:
+                tok = _make_token(u['name'], u['role'] or 'user', u['id'])
+                session.update({'auth':True,'role':u['role'] or 'user',
+                                'username':u['name'],'user_id':u['id']})
+                return redirect(url_for('index', t=tok))
         else:
-            error = 'סיסמה שגויה'
-    return render_template('login.html', error=error)
+            error = 'שם משתמש או סיסמה שגויים'
+    return render_template('login.html', error=error, info=info, mode=mode)
 
 @app.route('/logout')
 def logout():
+    tok = _token_from_request()
+    if tok:
+        try:
+            with get_db() as db:
+                db.execute("DELETE FROM auth_tokens WHERE token=?", (tok,))
+                db.commit()
+        except: pass
     session.clear()
     return redirect(url_for('login'))
 
@@ -189,7 +282,11 @@ def auth_required(f):
     from functools import wraps
     @wraps(f)
     def d(*a,**kw):
-        if not session.get('auth'): return redirect(url_for('login'))
+        if not current_user():
+            # For API calls return JSON 401; for pages redirect
+            if request.path.startswith('/api/'):
+                return jsonify({'error':'לא מחובר','auth':False}), 401
+            return redirect(url_for('login'))
         return f(*a,**kw)
     return d
 
@@ -197,7 +294,7 @@ def admin_required(f):
     from functools import wraps
     @wraps(f)
     def d(*a,**kw):
-        if not session.get('auth') or not is_admin():
+        if not is_admin():
             return jsonify({'error':'אין הרשאה'}),403
         return f(*a,**kw)
     return d
@@ -207,16 +304,19 @@ def admin_required(f):
 @auth_required
 def index():
     from flask import make_response
+    u = current_user()
     with get_db() as db:
         lists = db.execute("SELECT * FROM lists ORDER BY created_at DESC").fetchall()
     resp = make_response(render_template('index.html', lists=lists,
-                           username=session.get('username',''), is_admin=is_admin()))
+                           username=u['username'], is_admin=(u['role']=='admin'),
+                           auth_token=u.get('token') or ''))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     return resp
 
 @app.route('/list/<int:lid>')
 @auth_required
 def list_view(lid):
+    u = current_user()
     lst = get_list(lid)
     if not lst: return redirect(url_for('index'))
     lst['columns']      = json.loads(lst['columns'])
@@ -225,7 +325,8 @@ def list_view(lid):
     lst['trial_start']  = lst['trial_start'] or ''
     lst['trial_end']    = lst['trial_end']   or ''
     return render_template('list.html', lst=lst,
-                           username=session.get('username',''), is_admin=is_admin())
+                           username=u['username'], is_admin=(u['role']=='admin'),
+                           auth_token=u.get('token') or '')
 
 # ── API: Lists ─────────────────────────────────────────────────────────────────
 @app.route('/api/lists', methods=['GET'])
@@ -326,8 +427,12 @@ def api_create_row(lid):
 def api_update_row(rid):
     new_data = request.json
     now = datetime.now().isoformat()
+    # Fields that, when changed, invalidate the car assignment
+    CAR_AFFECTING = {'תאריך הגעה', 'תאריך חזרה', 'הגעה', 'חזרה', 'רכב חברה', 'שם', 'שם משפחה'}
     with get_db() as db:
         old = db.execute("SELECT * FROM list_rows WHERE id=?", (rid,)).fetchone()
+        cars_affected = False
+        lid_for_row = old['list_id'] if old else None
         if old:
             old_data = json.loads(old['data'])
             if not is_admin():
@@ -337,16 +442,25 @@ def api_update_row(rid):
                 if str(old_data.get(k,'')) != str(new_data.get(k,'')):
                     log_change(db, rid, old['list_id'], 'עדכון', k,
                                str(old_data.get(k,'')), str(new_data.get(k,'')))
+                    if k in CAR_AFFECTING:
+                        cars_affected = True
         db.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
                    (json.dumps(new_data, ensure_ascii=False), now, rid))
+        # Mark car assignment as stale + record a pending change for admin
+        if cars_affected and lid_for_row is not None:
+            db.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES (?,?)",
+                       (f'cars_dirty_{lid_for_row}', '1'))
+        if lid_for_row is not None:
+            db.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES (?,?)",
+                       (f'last_change_{lid_for_row}', now))
         db.commit()
-    return jsonify({'ok':True})
+    return jsonify({'ok':True, 'cars_affected':cars_affected})
 
 @app.route('/api/rows/<int:rid>/confirm', methods=['POST'])
 @auth_required
 def api_confirm_row(rid):
     now = datetime.now().isoformat()
-    username = session.get('username','?')
+    username = cur_username()
     with get_db() as db:
         row = db.execute("SELECT * FROM list_rows WHERE id=?", (rid,)).fetchone()
         if not row: return jsonify({'ok':False}),404
@@ -576,7 +690,7 @@ def api_approve_gap(lid):
     key = request.json.get('key')
     with get_db() as db:
         db.execute("INSERT OR REPLACE INTO approved_gaps (list_id,gap_key,approved_by,approved_at) VALUES (?,?,?,?)",
-                   (lid, key, session.get('username'), datetime.now().isoformat()))
+                   (lid, key, cur_username(), datetime.now().isoformat()))
         db.commit()
     return jsonify({'ok':True})
 
@@ -614,7 +728,7 @@ def api_fix_issue(lid):
         with get_db() as db:
             cur = db.execute("INSERT INTO list_rows (list_id,data) VALUES (?,?)",
                              (lid, json.dumps(data, ensure_ascii=False)))
-            log_change(db, cur.lastrowid, lid, f'תיקון אוטומטי: הוסף {full_name} לצוות {team}', by=session.get('username'))
+            log_change(db, cur.lastrowid, lid, f'תיקון אוטומטי: הוסף {full_name} לצוות {team}', by=cur_username())
             db.commit()
         period = arr_date if end_date == arr_date else f'{arr_date} עד {end_date}'
         return jsonify({'ok':True, 'message':f'{full_name} נוסף/ה לצוות {team} לתקופה {period}', 'row_id': cur.lastrowid})
@@ -637,7 +751,7 @@ def api_fix_issue(lid):
             with get_db() as db:
                 cur = db.execute("INSERT INTO list_rows (list_id,data) VALUES (?,?)",
                                  (lid, json.dumps(data, ensure_ascii=False)))
-                log_change(db, cur.lastrowid, lid, f'תיקון: הוסף {full_name} מ-{next_day}', by=session.get('username'))
+                log_change(db, cur.lastrowid, lid, f'תיקון: הוסף {full_name} מ-{next_day}', by=cur_username())
                 db.commit()
             return jsonify({'ok':True,'message':f'{full_name} נוסף/ה מ-{next_day}'})
 
@@ -775,6 +889,8 @@ def api_assign_step1(lid):
                         conn.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
                                      (json.dumps(d2,ensure_ascii=False), now, p['id']))
                         pool.remove(p); assigned += 1; pax += 1
+            conn.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES (?,'0')",
+                         (f'cars_dirty_{lid}',))
             conn.commit()
 
             ungrouped = [p['full'] for p in people if not p['arrival'] or not p['departure']]
@@ -1019,6 +1135,8 @@ def api_car_view(lid):
         if unassigned_arrive: rec.append(f'הגעה: {len(unassigned_arrive)} ללא רכב')
         if unassigned_return: rec.append(f'חזרה: {len(unassigned_return)} ללא רכב')
 
+        cars_dirty = (get_setting(f'cars_dirty_{lid}') == '1')
+
         return jsonify({
             'cars_arrive':cars_arrive, 'cars_return':cars_return,
             'car_capacity':car_capacity, 'car_count':car_count,
@@ -1027,7 +1145,134 @@ def api_car_view(lid):
             'total_arrive':sum(len(v['people']) for v in cars_arrive.values()),
             'total_return':sum(len(v['people']) for v in cars_return.values()),
             'recommendation':rec,
+            'cars_dirty':cars_dirty,
         })
+    except Exception as e:
+        return jsonify({'ok':False,'error':str(e)}), 500
+
+
+# ── API: People list (for manual-assignment dropdowns) ────────────────────────
+@app.route('/api/lists/<int:lid>/car-people', methods=['GET'])
+@auth_required
+def api_car_people_list(lid):
+    """Return all assignable people (no company car) with their dates."""
+    try:
+        people = _car_people(lid)
+        return jsonify({'ok':True, 'people':[
+            {'name':p['full'], 'arrival':p['arrival'], 'departure':p['departure']}
+            for p in sorted(people, key=lambda x:x['full'])
+        ]})
+    except Exception as e:
+        return jsonify({'ok':False,'error':str(e)}), 500
+
+
+# ── API: Manual assignment save + validate ────────────────────────────────────
+@app.route('/api/lists/<int:lid>/manual-assign', methods=['POST'])
+@admin_required
+def api_manual_assign(lid):
+    """
+    Accept a full manual assignment and validate it.
+    Payload: {
+      cars: {
+        'רכב 1': {arrive:['name',...], return:['name',...], driver:'name'},
+        ...
+      }
+    }
+    Writes רכב הלוך / רכב חזור per person, sets drivers, returns warnings.
+    """
+    try:
+        data = request.json or {}
+        cars = data.get('cars', {})
+        lst  = get_list(lid)
+        cap  = max(1, lst['car_capacity'])
+        now  = datetime.now().isoformat()
+
+        # Map name -> row id and dates
+        people = _car_people(lid)
+        name_to_id   = {p['full']: p['id'] for p in people}
+        name_to_dates = {p['full']: (p['arrival'], p['departure']) for p in people}
+
+        warnings = []
+
+        # Validate capacities and duplicates before writing
+        seen_arrive, seen_return = {}, {}
+        for cname, c in cars.items():
+            arr = c.get('arrive', []) or []
+            ret = c.get('return', []) or []
+            if len(arr) > cap:
+                warnings.append(f'{cname}: {len(arr)} בהגעה חורג מקיבולת {cap}')
+            if len(ret) > cap:
+                warnings.append(f'{cname}: {len(ret)} בחזרה חורג מקיבולת {cap}')
+            for n in arr:
+                if n in seen_arrive:
+                    warnings.append(f'{n} משובץ בהגעה גם ב{seen_arrive[n]} וגם ב{cname}')
+                seen_arrive[n] = cname
+            for n in ret:
+                if n in seen_return:
+                    warnings.append(f'{n} משובץ בחזרה גם ב{seen_return[n]} וגם ב{cname}')
+                seen_return[n] = cname
+
+        # Date-consistency warnings: people in the same arrive car should share arrival date
+        for cname, c in cars.items():
+            arr_dates = set()
+            for n in (c.get('arrive') or []):
+                d = name_to_dates.get(n, ('',''))[0]
+                if d: arr_dates.add(d)
+            if len(arr_dates) > 1:
+                warnings.append(f'{cname}: תאריכי הגעה שונים באותו רכב ({", ".join(sorted(arr_dates))})')
+            ret_dates = set()
+            for n in (c.get('return') or []):
+                d = name_to_dates.get(n, ('',''))[1]
+                if d: ret_dates.add(d)
+            if len(ret_dates) > 1:
+                warnings.append(f'{cname}: תאריכי חזרה שונים באותו רכב ({", ".join(sorted(ret_dates))})')
+
+        # Write to DB (single connection)
+        conn = get_db()
+        try:
+            # Clear all assignments first
+            rows = conn.execute("SELECT * FROM list_rows WHERE list_id=?", (lid,)).fetchall()
+            for row in rows:
+                d = json.loads(row['data'])
+                if _gf(d,'רכב חברה').lower() in ['כן','yes','true','1']: continue
+                if d.get('רכב הלוך') or d.get('רכב חזור'):
+                    d['רכב הלוך']=''; d['רכב חזור']=''
+                    conn.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                                 (json.dumps(d,ensure_ascii=False), now, row['id']))
+            conn.execute("DELETE FROM car_drivers WHERE list_id=?", (lid,))
+
+            # Apply manual assignment
+            for cname, c in cars.items():
+                for n in (c.get('arrive') or []):
+                    rid = name_to_id.get(n)
+                    if not rid: continue
+                    r = conn.execute("SELECT data FROM list_rows WHERE id=?", (rid,)).fetchone()
+                    d = json.loads(r['data']); d['רכב הלוך']=cname
+                    conn.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                                 (json.dumps(d,ensure_ascii=False), now, rid))
+                for n in (c.get('return') or []):
+                    rid = name_to_id.get(n)
+                    if not rid: continue
+                    r = conn.execute("SELECT data FROM list_rows WHERE id=?", (rid,)).fetchone()
+                    d = json.loads(r['data']); d['רכב חזור']=cname
+                    conn.execute("UPDATE list_rows SET data=?,updated_at=? WHERE id=?",
+                                 (json.dumps(d,ensure_ascii=False), now, rid))
+                drv = c.get('driver','')
+                if drv:
+                    if drv in (c.get('arrive') or []):
+                        conn.execute("INSERT OR REPLACE INTO car_drivers (list_id,direction,car_name,driver) VALUES (?,'arrive',?,?)",
+                                     (lid, cname, drv))
+                    if drv in (c.get('return') or []):
+                        conn.execute("INSERT OR REPLACE INTO car_drivers (list_id,direction,car_name,driver) VALUES (?,'return',?,?)",
+                                     (lid, cname, drv))
+            # Manual assignment clears the dirty flag
+            conn.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES (?,'0')",
+                         (f'cars_dirty_{lid}',))
+            conn.commit()
+        finally:
+            conn.close()
+
+        return jsonify({'ok':True, 'warnings':warnings})
     except Exception as e:
         return jsonify({'ok':False,'error':str(e)}), 500
 
@@ -1344,6 +1589,13 @@ def api_excel_preview(lid):
     return jsonify({'sheets':sheets})
 
 # ── API: Changelog ─────────────────────────────────────────────────────────────
+@app.route('/api/lists/<int:lid>/last-change', methods=['GET'])
+@auth_required
+def api_last_change(lid):
+    return jsonify({'ok':True,
+                    'last_change': get_setting(f'last_change_{lid}') or '',
+                    'cars_dirty': get_setting(f'cars_dirty_{lid}') == '1'})
+
 @app.route('/api/lists/<int:lid>/changelog', methods=['GET'])
 @auth_required
 def api_changelog(lid):
@@ -1370,7 +1622,7 @@ def api_changelog_clear(lid):
 @admin_required
 def api_get_users():
     with get_db() as db:
-        users = db.execute("SELECT id,name,username,role,approved,created_at FROM users ORDER BY id").fetchall()
+        users = db.execute("SELECT id,name,username,password,role,approved,created_at FROM users ORDER BY id").fetchall()
     return jsonify([dict(u) for u in users])
 
 @app.route('/api/users', methods=['POST'])

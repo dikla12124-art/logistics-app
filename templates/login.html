@@ -24,6 +24,9 @@ button{width:100%;background:linear-gradient(135deg,#3b82f6,#1d4ed8);border:none
 button:hover{box-shadow:0 6px 20px rgba(59,130,246,.4);transform:translateY(-1px)}
 .error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:9px;padding:11px 14px;color:#fca5a5;font-size:13px;text-align:center;margin-bottom:14px}
 .hint{font-size:11px;color:rgba(255,255,255,.18);text-align:center;margin-top:14px;line-height:1.6}
+.info-msg{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);border-radius:9px;padding:11px 14px;color:#86efac;font-size:13px;text-align:center;margin-bottom:14px}
+.lnk{color:#93c5fd;text-decoration:none;font-size:12px;font-weight:600}
+.lnk:hover{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -32,15 +35,29 @@ button:hover{box-shadow:0 6px 20px rgba(59,130,246,.4);transform:translateY(-1px
   <div class="logo">
     <span class="logo-icon">🗂️</span>
     <h1>ניהול לוגיסטיקה</h1>
-    <p>הזן שם וסיסמה להמשך</p>
+    <p>{% if mode == 'register' %}הרשמה למערכת{% else %}הזן שם וסיסמה להמשך{% endif %}</p>
   </div>
   {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  {% if info %}<div class="info-msg">{{ info }}</div>{% endif %}
+
+  {% if mode == 'register' %}
   <form method="post">
-    <div class="fg"><label>שם מלא</label><input type="text" name="name" placeholder="לדוגמה: דקלה אברהם" autocomplete="name"></div>
-    <div class="fg"><label>סיסמה</label><input type="password" name="password" autofocus placeholder="••••••••"></div>
+    <input type="hidden" name="action" value="register">
+    <div class="fg"><label>שם מלא</label><input type="text" name="name" placeholder="לדוגמה: דקלה אברהם" autocomplete="name" required></div>
+    <div class="fg"><label>שם משתמש (לכניסה)</label><input type="text" name="username" placeholder="לדוגמה: dikla" autocomplete="username"></div>
+    <div class="fg"><label>בחר סיסמה</label><input type="password" name="password" placeholder="לפחות 4 תווים" required></div>
+    <button type="submit">הרשמה →</button>
+  </form>
+  <p class="hint"><a href="/login?mode=login" class="lnk">כבר רשום? כניסה</a></p>
+  {% else %}
+  <form method="post">
+    <input type="hidden" name="action" value="login">
+    <div class="fg"><label>שם / שם משתמש</label><input type="text" name="name" placeholder="השם שלך" autocomplete="username" autofocus></div>
+    <div class="fg"><label>סיסמה</label><input type="password" name="password" placeholder="••••••••"></div>
     <button type="submit">כניסה →</button>
   </form>
-  <p class="hint">אדמין — סיסמת מנהל · משתמש רגיל — סיסמה רגילה<br>השם מופיע ביומן השינויים ובאישורים</p>
+  <p class="hint"><a href="/login?mode=register" class="lnk">משתמש חדש? הרשמה</a><br>אדמין נכנס עם סיסמת המנהל</p>
+  {% endif %}
 </div>
 </body>
 </html>

@@ -128,6 +128,9 @@ tr:hover .del-btn{opacity:1}
 .cv-seat.driver{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.25);color:#86efac}
 .cv-seat.empty{background:rgba(255,255,255,.02);border-color:rgba(255,255,255,.03);color:rgba(255,255,255,.2);font-style:italic}
 .cv-seat .sname{flex:1}.cv-seat .dbadge{font-size:10px;background:rgba(34,197,94,.2);color:#86efac;border-radius:20px;padding:1px 7px;font-weight:700}
+.seat-sel{flex:1;background:rgba(255,255,255,.07);border:1px solid rgba(59,130,246,.3);border-radius:6px;padding:3px 6px;color:#fff;font-size:11px;font-family:'Heebo',sans-serif;outline:none;direction:rtl}
+.seat-sel option{background:#1a1d27;color:#fff}
+.cv-manual-bar{background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:11px;padding:11px 15px;color:#93c5fd;font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:10px}
 .md-btn{font-size:10px;background:none;border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.3);cursor:pointer;padding:2px 7px;font-family:'Heebo',sans-serif;transition:all .14s;opacity:0;white-space:nowrap}
 .cv-seat:hover .md-btn{opacity:1}
 .md-btn:hover{border-color:rgba(34,197,94,.4);color:#86efac}
@@ -161,6 +164,12 @@ tr:hover .del-btn{opacity:1}
 .btn-step .step-num{background:rgba(59,130,246,.3);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0}
 .btn-step small{display:block;font-size:9px;color:rgba(255,255,255,.4);margin-top:1px}
 .step-arrow{color:rgba(255,255,255,.2);font-size:16px}
+.cv-dirty{background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.35);border-radius:11px;padding:12px 15px;color:#fcd34d;font-size:13px;font-weight:600;margin-bottom:12px;text-align:center}
+.change-notice{position:fixed;bottom:20px;left:20px;z-index:9999;background:rgba(30,41,59,.97);backdrop-filter:blur(12px);border:1px solid rgba(59,130,246,.4);border-radius:13px;padding:13px 16px;display:flex;align-items:center;gap:11px;box-shadow:0 12px 40px rgba(0,0,0,.5);font-size:13px;color:#e2e8f0;max-width:90vw;animation:slideUp .3s ease}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.change-notice button{background:rgba(59,130,246,.2);border:1px solid rgba(59,130,246,.35);border-radius:8px;padding:5px 11px;color:#93c5fd;cursor:pointer;font-family:'Heebo',sans-serif;font-size:12px;font-weight:600}
+.change-notice button.x{background:none;border:none;color:rgba(255,255,255,.4);font-size:18px;padding:0 4px}
+.change-notice button:hover{background:rgba(59,130,246,.3)}
 .lw{padding:2px 0}.li{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start}
 .li:last-child{border:none}.ld{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:4px}
 .d-e{background:#3b82f6}.d-c{background:#22c55e}.d-d{background:#ef4444}.d-a{background:#a855f7}.d-car{background:#fbbf24}
@@ -193,7 +202,7 @@ tr:hover .del-btn{opacity:1}
 <body>
 <div class="bg"></div>
 <div class="topbar">
-  <a href="/" class="back">→</a>
+  <a href="/" class="back" onclick="event.preventDefault();location.href='/?t='+encodeURIComponent(window.AUTH_TOKEN||'')">→</a>
   <div class="ttl">{{ lst.name }}</div>
   <span class="rbadge {{ 'r-admin' if is_admin else 'r-user' }}">{{ '👑 אדמין' if is_admin else '👤 '+username }}</span>
   {% if is_admin %}<button class="btn btn-primary" onclick="addRow()">+ שורה</button>{% endif %}
@@ -230,23 +239,73 @@ tr:hover .del-btn{opacity:1}
 </div></div>
 
 <script>
+// ── Per-tab auth token ──────────────────────────────────────────────────────────
+(function(){
+  const params=new URLSearchParams(location.search);
+  let TOKEN=params.get('t')||sessionStorage.getItem('authToken')||'';
+  if(params.get('t')) sessionStorage.setItem('authToken', params.get('t'));
+  // If token missing from URL but present in storage, re-add it so refresh keeps the session
+  if(!params.get('t') && TOKEN){
+    params.set('t', TOKEN);
+    history.replaceState(null,'',location.pathname+'?'+params.toString());
+  }
+  const _f=window.fetch;
+  window.fetch=function(url,opts){
+    opts=opts||{};
+    opts.headers=Object.assign({},opts.headers||{},{'X-Auth-Token':TOKEN});
+    return _f(url,opts);
+  };
+  window.AUTH_TOKEN=TOKEN;
+  window.doLogout=function(){location.href='/logout?t='+encodeURIComponent(TOKEN);};
+})();
+
 const LID={{lst.id}}, IS_ADMIN={{('true' if is_admin else 'false')}}, USERNAME={{username|tojson}};
 let lstConfig={{{'teams':lst.teams,'car_count':lst.car_count,'car_capacity':lst.car_capacity,'trial_start':lst.trial_start or '','trial_end':lst.trial_end or ''}|tojson}};
 const ADMIN_ONLY=new Set(['מספר ת"ז']), AUTO_COLS=new Set(['רכב הלוך','רכב חזור']);
 let rows=[], activeId='table', sortCol=null, sortDir=1, search='', selRows=new Set();
 let currentIssues=[], currentRowIssues={};
 let carViewDir='arrive', carViewData=null;
+let manualMode=false, allPeopleNames=[];
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
 async function init(){
   await loadRows();
   renderTabs();
   renderTable();
+  if(IS_ADMIN) startChangeWatch();
 }
 
-async function loadRows(){
-  const r=await fetch('/api/lists/'+LID+'/rows');
-  rows=await r.json();
+// ── Admin change notifier ──────────────────────────────────────────────────────
+let _lastSeenChange=null, _watchStarted=false;
+async function startChangeWatch(){
+  if(_watchStarted) return; _watchStarted=true;
+  // Record baseline so we only alert on NEW changes
+  try{
+    const j=await (await fetch('/api/lists/'+LID+'/last-change')).json();
+    _lastSeenChange=j.last_change||'';
+  }catch(e){}
+  setInterval(checkForChanges, 12000);  // every 12s
+}
+async function checkForChanges(){
+  try{
+    const j=await (await fetch('/api/lists/'+LID+'/last-change')).json();
+    if(j.last_change && j.last_change!==_lastSeenChange){
+      _lastSeenChange=j.last_change;
+      showChangeNotice(j.cars_dirty);
+    }
+  }catch(e){}
+}
+function showChangeNotice(carsDirty){
+  const existing=document.getElementById('changeNotice');
+  if(existing) existing.remove();
+  const n=document.createElement('div');
+  n.id='changeNotice';
+  n.className='change-notice';
+  n.innerHTML=`<span>🔔 בוצע שינוי ברשימה${carsDirty?' המשפיע על שיבוץ הרכבים':''}</span>
+    <button onclick="switchTab('log');showLog();document.getElementById('changeNotice').remove()">📋 ליומן</button>
+    <button class="x" onclick="document.getElementById('changeNotice').remove()">×</button>`;
+  document.body.appendChild(n);
+  setTimeout(()=>{const e=document.getElementById('changeNotice');if(e)e.remove();}, 15000);
 }
 
 // ── TABS ───────────────────────────────────────────────────────────────────────
@@ -371,7 +430,12 @@ async function addRow(){
 async function updCell(rowId,col,val){
   const row=rows.find(r=>r.id===rowId); if(!row)return;
   row.data[col]=val;
-  await fetch('/api/rows/'+rowId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(row.data)});
+  const r=await fetch('/api/rows/'+rowId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(row.data)});
+  const j=await r.json().catch(()=>({}));
+  toast('💾 נשמר');
+  if(j&&j.cars_affected){
+    toast('⚠️ השינוי משפיע על שיבוץ הרכבים — יש לשבץ מחדש');
+  }
 }
 
 async function cfmRow(rid,btn){
@@ -682,7 +746,24 @@ async function showCarView(){
 
 function fmtDate(d){if(!d)return '';const p=d.split('-');return p.length===3?`${p[2]}/${p[1]}`:d;}
 
-function renderPassengers(people, capacity, driver){
+function renderPassengers(people, capacity, driver, cname, dir){
+  // Manual mode: dropdown per seat
+  if(manualMode){
+    let html='<div class="cv-seats">';
+    for(let i=0;i<capacity;i++){
+      const cur=people[i]||'';
+      const opts=['<option value="">— פנוי —</option>']
+        .concat(allPeopleNames.map(n=>`<option value="${n}" ${n===cur?'selected':''}>${n}</option>`))
+        .join('');
+      html+=`<div class="cv-seat ${cur&&cur===driver?'driver':''}">
+        <span>${cur&&cur===driver?'🧑‍✈️':'🪑'}</span>
+        <select class="seat-sel" data-car="${cname}" data-dir="${dir}" data-seat="${i}" onchange="onSeatChange()">${opts}</select>
+      </div>`;
+    }
+    html+='</div>';
+    return html;
+  }
+  // Normal view
   let html='<div class="cv-seats">';
   people.forEach(person=>{
     const isDrv=driver&&driver===person;
@@ -703,6 +784,9 @@ function renderCarView(){
   let html='';
 
   // ── 3-step buttons always at TOP ──────────────────────────────────────────
+  if(d.cars_dirty)
+    html+=`<div class="cv-dirty">⚠️ בוצעו שינויים שמשפיעים על שיבוץ הרכבים — יש לשבץ מחדש (שלב 1)</div>`;
+
   if(IS_ADMIN) html+=`
     <div class="assign-steps">
       <button class="btn btn-step" onclick="assignStep1()">
@@ -721,7 +805,11 @@ function renderCarView(){
       </button>
       <button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="assignReset()">🗑 אפס הכל</button>
       <button class="btn btn-ghost btn-sm" onclick="checkDates()">🔍 בדוק תאריכים</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleManual()">${manualMode?'✖️ בטל עריכה ידנית':'✏️ עריכה ידנית'}</button>
     </div>`;
+
+  if(manualMode)
+    html+=`<div class="cv-manual-bar">✏️ מצב עריכה ידנית — בחרי אנשים בכל מושב ואז לחצי "שמור ובדוק"<button class="btn btn-primary btn-sm" style="margin-right:auto" onclick="saveManual()">💾 שמור ובדוק</button></div>`;
 
   if(d.recommendation&&d.recommendation.length)
     html+=`<div class="cv-rec">⚠️ ${d.recommendation.join(' · ')}</div>`;
@@ -761,11 +849,11 @@ function renderCarView(){
       <div class="cv-dirs">
         <div class="cv-dir-col">
           <div class="cv-dir-label">✈️ הגעה ${carA.date?`<span class="cv-date-badge">${fmtDate(carA.date)}</span>`:''} <span class="cv-dir-count">${carA.people.length}/${carA.capacity}</span></div>
-          ${renderPassengers(carA.people,carA.capacity,driver)}
+          ${renderPassengers(carA.people,carA.capacity,driver,cname,'arrive')}
         </div>
         <div class="cv-dir-col">
           <div class="cv-dir-label">🏠 חזרה ${carR.date?`<span class="cv-date-badge">${fmtDate(carR.date)}</span>`:''} <span class="cv-dir-count">${carR.people.length}/${carR.capacity}</span></div>
-          ${renderPassengers(carR.people,carR.capacity,driver)}
+          ${renderPassengers(carR.people,carR.capacity,driver,cname,'return')}
         </div>
       </div>
     </div>`;
@@ -781,25 +869,6 @@ function renderCarView(){
     if(unR.length) html+=`<h4 style="margin-bottom:5px">⚠️ ${unR.length} ללא שיבוץ חזרה</h4><div class="cv-tags">${unR.map(p=>`<span class="cv-ptag">${p}</span>`).join('')}</div>`;
     html+=`</div>`;
   }
-
-  if(IS_ADMIN) html+=`
-    <div class="assign-steps">
-      <button class="btn btn-step" onclick="assignStep1()">
-        <span class="step-num">1</span>
-        <span>שיבוץ אחיד<small>הלוך+חזור ביחד</small></span>
-      </button>
-      <span class="step-arrow">←</span>
-      <button class="btn btn-step" onclick="assignStep2()">
-        <span class="step-num">2</span>
-        <span>שיבוץ הלוך<small>לפי תאריך הגעה</small></span>
-      </button>
-      <span class="step-arrow">←</span>
-      <button class="btn btn-step" onclick="assignStep3()">
-        <span class="step-num">3</span>
-        <span>שיבוץ חזור<small>לפי תאריך חזרה</small></span>
-      </button>
-      <button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="assignReset()">🗑 אפס הכל</button>
-    </div>`;
 
   area.innerHTML=html;
 }
@@ -817,6 +886,58 @@ async function setDriver(car,person,isCurrent){
   await fetch('/api/lists/'+LID+'/car-driver',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({car_name:car,driver:isCurrent?'':person})});
   await showCarView();
+}
+
+// ── MANUAL ASSIGNMENT ──────────────────────────────────────────────────────────
+async function toggleManual(){
+  if(!manualMode){
+    // Entering manual mode — load all people names for dropdowns
+    try{
+      const j=await (await fetch('/api/lists/'+LID+'/car-people')).json();
+      allPeopleNames=(j.people||[]).map(p=>p.name);
+    }catch(e){allPeopleNames=[];}
+    manualMode=true;
+  } else {
+    manualMode=false;
+  }
+  renderCarView();
+}
+
+function onSeatChange(){
+  // Prevent the same person being selected twice in the same direction
+  // (soft check — full validation happens on save)
+}
+
+async function saveManual(){
+  // Collect all dropdown selections into a cars structure
+  const cars={};
+  document.querySelectorAll('.seat-sel').forEach(sel=>{
+    const cname=sel.dataset.car, dir=sel.dataset.dir, val=sel.value;
+    if(!cars[cname]) cars[cname]={arrive:[],return:[],driver:''};
+    if(val){
+      if(dir==='arrive') cars[cname].arrive.push(val);
+      else cars[cname].return.push(val);
+    }
+  });
+  // Driver = first person who appears in BOTH arrive and return of the car
+  Object.values(cars).forEach(c=>{
+    const both=c.arrive.find(n=>c.return.includes(n));
+    c.driver=both||c.arrive[0]||c.return[0]||'';
+  });
+
+  toast('⏳ שומר ובודק...');
+  const r=await fetch('/api/lists/'+LID+'/manual-assign',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({cars})});
+  const j=await r.json();
+  if(!j.ok){toast('❌ '+(j.error||'שגיאה'));return;}
+  manualMode=false;
+  await showCarView();
+  if(j.warnings&&j.warnings.length){
+    toast(`⚠️ נשמר עם ${j.warnings.length} אזהרות`);
+    alert('⚠️ השיבוץ נשמר אך נמצאו בעיות:\n\n• '+j.warnings.join('\n• '));
+  } else {
+    toast('✅ השיבוץ הידני נשמר — אין בעיות');
+  }
 }
 
 // ── CHANGELOG ─────────────────────────────────────────────────────────────────
